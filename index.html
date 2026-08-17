@@ -77,6 +77,26 @@
       <div id="daftar-pendaftaran"></div>
     </section>
 
+    <!--
+      Kode undangan. Ditaruh SESUDAH antrean pendaftaran dan sebelum sisanya: ia dipakai tepat
+      sebelum menelepon calon gerai, jadi ia dekat dengan yang sedang dikerjakan admin — bukan
+      terkubur di dasar halaman bersama riwayat.
+    -->
+    <section>
+      <h2>Kode undangan</h2>
+      <p class="redup">
+        Calon gerai tidak dapat mendaftar tanpa kode. Buat satu kode untuk satu gerai, lalu
+        bacakan lewat telepon atau WhatsApp.
+      </p>
+      <label for="kode-catatan">Untuk siapa (wajib)</label>
+      <input id="kode-catatan" placeholder="mis. Kopi Pagi — Bu Sari 0812…">
+      <label for="kode-hari">Berlaku berapa hari</label>
+      <input id="kode-hari" type="number" min="1" max="90" value="14">
+      <div class="aksi"><button class="utama" id="buat-kode">Buat kode</button></div>
+      <table><thead><tr><th>Kode</th><th>Untuk</th><th>Berlaku s/d</th><th>Keadaan</th></tr></thead>
+      <tbody id="daftar-kode"></tbody></table>
+    </section>
+
     <section>
       <h2>Bukti masuk (<span id="jml-bukti">0</span>)</h2>
       <div id="daftar-bukti"></div>
@@ -106,6 +126,27 @@ const sb = createClient(URL_SUPABASE, ANON)
 const $ = (id) => document.getElementById(id)
 const rupiah = (n) => 'Rp ' + Number(n).toLocaleString('id-ID')
 
+/**
+ * Meloloskan teks agar aman disisipkan ke HTML. **WAJIB untuk setiap nilai yang datang dari
+ * server**, tanpa kecuali.
+ *
+ * Sebelum ini `nama_gerai` dan `nama_pemilik` disisipkan mentah ke `innerHTML`. Keduanya diketik
+ * PENDAFTAR, dan `periksaIsian` hanya menuntut tidak kosong dan maksimal 80 karakter — jadi nama
+ * gerai berisi `<img src=x onerror=…>` menjalankan skrip di panel ini, dengan sesi admin yang
+ * berwenang menyetujui pembayaran, menyetujui pendaftaran, dan membatalkan keputusan. Pendaftar
+ * mana pun dapat mengambil alih panel dengan mengisi satu kolom formulir.
+ *
+ * Diloloskan juga nilai yang "pasti aman" seperti email admin dan status gerai: aturan yang punya
+ * pengecualian akan dipakai salah oleh orang berikutnya yang menambah baris di sini, dan ia tidak
+ * akan tahu nilai mana yang termasuk pengecualian.
+ */
+const lolos = (v) => String(v ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;')
+
 function pesan(teks, galat = false) {
   $('pesan').innerHTML = teks ? `<div class="pesan ${galat ? 'galat' : ''}">${teks}</div>` : ''
 }
@@ -126,21 +167,21 @@ async function panggil(fungsi, isi = {}) {
 
 function gambarBukti(b) {
   return b.gambar
-    ? `<img class="bukti" src="${b.gambar}" alt="Bukti transfer ${b.gerai}">`
+    ? `<img class="bukti" src="${lolos(b.gambar)}" alt="Bukti transfer ${lolos(b.gerai)}">`
     : `<p class="redup">Gambar tidak dapat dimuat.</p>`
 }
 
 function kartuBukti(b) {
   return `
-    <div class="kartu" data-proof="${b.proofId}">
+    <div class="kartu" data-proof="${lolos(b.proofId)}">
       <div class="baris">
         <div>
-          <strong>${b.gerai}</strong><br>
-          <span class="redup">${b.pemilik} · gerai ${b.statusGerai}</span>
+          <strong>${lolos(b.gerai)}</strong><br>
+          <span class="redup">${lolos(b.pemilik)} · gerai ${lolos(b.statusGerai)}</span>
         </div>
         <div class="nominal">${rupiah(b.nominal)}</div>
       </div>
-      <p class="redup">Jatuh tempo ${b.jatuhTempo} · diunggah ${new Date(b.diunggah).toLocaleString('id-ID')}</p>
+      <p class="redup">Jatuh tempo ${lolos(b.jatuhTempo)} · diunggah ${new Date(b.diunggah).toLocaleString('id-ID')}</p>
       ${gambarBukti(b)}
       <label>Alasan (wajib bila menolak)</label>
       <textarea rows="2" class="alasan" placeholder="mis. nominal tidak cocok"></textarea>
@@ -155,13 +196,13 @@ function kartuPendaftaran(p) {
   // Nomor HP ditampilkan sebagai tautan WhatsApp, dan itu PENGGANTI OTP di rancangan ini:
   // tidak ada yang membuktikan nomornya benar kecuali admin menghubunginya sebelum memutuskan.
   return `
-    <div class="kartu" data-daftar="${p.id}">
+    <div class="kartu" data-daftar="${lolos(p.id)}">
       <div class="baris">
         <div>
-          <strong>${p.nama_gerai}</strong><br>
-          <span class="redup">${p.nama_pemilik}</span>
+          <strong>${lolos(p.nama_gerai)}</strong><br>
+          <span class="redup">${lolos(p.nama_pemilik)}</span>
         </div>
-        <a href="https://wa.me/${p.no_hp}" target="_blank" rel="noopener">${p.no_hp}</a>
+        <a href="https://wa.me/${lolos(p.no_hp)}" target="_blank" rel="noopener">${lolos(p.no_hp)}</a>
       </div>
       <p class="redup">Mendaftar ${new Date(p.didaftarkan_pada).toLocaleString('id-ID')}</p>
       <label>Alasan (wajib bila menolak)</label>
@@ -175,14 +216,39 @@ function kartuPendaftaran(p) {
 
 function barisKeputusan(k) {
   const batal = k.dibatalkan_pada
-    ? `<span class="redup">dibatalkan oleh ${k.dibatalkan_oleh}</span>`
-    : `<button class="bahaya batal" data-id="${k.id}">Batalkan</button>`
+    ? `<span class="redup">dibatalkan oleh ${lolos(k.dibatalkan_oleh)}</span>`
+    : `<button class="bahaya batal" data-id="${lolos(k.id)}">Batalkan</button>`
   return `<tr>
     <td>${new Date(k.diputuskan_pada).toLocaleString('id-ID')}</td>
-    <td>${k.keputusan}</td>
-    <td class="redup">${k.diputuskan_oleh}</td>
+    <td>${lolos(k.keputusan)}</td>
+    <td class="redup">${lolos(k.diputuskan_oleh)}</td>
     <td>${batal}</td>
   </tr>`
+}
+
+/**
+ * Satu baris kode undangan.
+ *
+ * Keadaannya disebut dengan kata, bukan warna — panel dibuka dari ponsel di bawah cahaya apa pun,
+ * dan "hijau berarti masih bisa dipakai" tidak terbaca oleh semua orang.
+ */
+function barisKode(k) {
+  const keadaan = k.dipakaiPada
+    ? `terpakai ${new Date(k.dipakaiPada).toLocaleDateString('id-ID')}`
+    : k.kadaluarsa ? 'kedaluwarsa' : 'belum dipakai'
+  return `<tr>
+    <td><code>${lolos(k.dibacakan)}</code></td>
+    <td>${lolos(k.catatan)}</td>
+    <td class="redup">${new Date(k.kadaluarsaPada).toLocaleDateString('id-ID')}</td>
+    <td class="redup">${keadaan}</td>
+  </tr>`
+}
+
+async function muatKode() {
+  const d = await panggil('admin-kode', { aksi: 'daftar' })
+  $('daftar-kode').innerHTML = d.kode.length
+    ? d.kode.map(barisKode).join('')
+    : '<tr><td colspan="4" class="redup">Belum ada kode.</td></tr>'
 }
 
 async function muat() {
@@ -198,17 +264,38 @@ async function muat() {
     ? d.bukti.map(kartuBukti).join('')
     : '<p class="redup">Tidak ada bukti yang menunggu.</p>'
   $('daftar-tenant').innerHTML = d.tenants.map((t) =>
-    `<tr><td>${t.nama}<br><span class="redup">${t.owner_name}</span></td>
-     <td>${t.status}</td><td class="redup">${t.cycle_start} → ${t.cycle_end}</td></tr>`).join('')
+    `<tr><td>${lolos(t.nama)}<br><span class="redup">${lolos(t.owner_name)}</span></td>
+     <td>${lolos(t.status)}</td>
+     <td class="redup">${lolos(t.cycle_start)} → ${lolos(t.cycle_end)}</td></tr>`).join('')
   $('daftar-keputusan').innerHTML = d.keputusan.length
     ? d.keputusan.map(barisKeputusan).join('')
     : '<tr><td colspan="4" class="redup">Belum ada keputusan.</td></tr>'
+  await muatKode()
   pesan('')
 }
 
 document.addEventListener('click', async (e) => {
   const t = e.target
   if (!(t instanceof HTMLElement)) return
+
+  if (t.id === 'buat-kode') {
+    const catatan = $('kode-catatan').value.trim()
+    if (!catatan) return pesan('Tulis dulu untuk siapa kode ini.', true)
+    t.disabled = true
+    try {
+      const d = await panggil('admin-kode', {
+        aksi: 'buat', catatan, hariBerlaku: Number($('kode-hari').value),
+      })
+      $('kode-catatan').value = ''
+      // Kodenya ditampilkan BESAR dan tetap terlihat: admin akan membacakannya lewat telepon, dan
+      // pesan yang hilang sendiri memaksanya mencari ulang di tabel.
+      pesan(`Kode untuk ${lolos(catatan)}: <strong style="font-size:1.4em">${lolos(d.dibacakan)}</strong>` +
+        ` — berlaku sampai ${new Date(d.kadaluarsaPada).toLocaleDateString('id-ID')}. Sekali pakai.`)
+      await muatKode()
+    } catch (err) { pesan(err.message, true) }
+    finally { t.disabled = false }
+    return
+  }
 
   if (t.classList.contains('setuju') || t.classList.contains('tolak')) {
     const kartu = t.closest('[data-proof]')

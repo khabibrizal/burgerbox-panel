@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Panel Langganan — BurgerBox</title>
+<!--
+  Panel Super Admin. SATU berkas, tanpa langkah build, tanpa kerangka kerja.
+
+  HALAMAN INI MEMANG PUBLIK. Yang ada di dalamnya hanya kode tampilan dan `anon key` — kunci
+  yang dirancang untuk publik dan tidak dapat membaca apa pun, sebab RLS menyala tanpa policy
+  di seluruh tabel. Semua data datang dari Edge Function yang menuntut JWT admin, dan JWT yang
+  sah pun ditolak bila pemiliknya tidak ada di tabel `admins`.
+
+  YANG TIDAK BOLEH ADA DI SINI: `service_role key`. Ia melewati RLS sepenuhnya.
+
+  Nilai https://fpyamxztplpbiszttfoi.supabase.co dan eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZweWFteHp0cGxwYmlzenR0Zm9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NjU3MzcsImV4cCI6MjEwMjI0MTczN30.CiRinf7qLQx6Xtx0OSqLKb9mP8pVhFs16enCzyy4sG0 disuntik `scripts/unggah-panel.mjs` dari
+  `.env.local` — bukan diketik ulang, supaya tidak ada kesempatan salah salin.
+-->
+<style>
+  :root { --bg:#faf9f7; --fg:#1a1a1a; --garis:#e0ddd8; --merah:#b3261e; --hijau:#1b6b3a; --redup:#6b6660; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16150f; --fg:#f0ede6; --garis:#33302a; --merah:#f2b8b5; --hijau:#7fd3a0; --redup:#a19b92; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { padding:16px; border-bottom:1px solid var(--garis); display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; }
+  main { padding:16px; max-width:900px; margin:0 auto; }
+  section { margin-bottom:32px; }
+  h2 { font-size:15px; text-transform:uppercase; letter-spacing:.06em; color:var(--redup); border-bottom:1px solid var(--garis); padding-bottom:6px; }
+  .kartu { border:1px solid var(--garis); border-radius:10px; padding:14px; margin-bottom:14px; }
+  .baris { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .nominal { font-size:22px; font-weight:600; }
+  img.bukti { max-width:100%; border-radius:8px; border:1px solid var(--garis); margin-top:10px; }
+  button { font:inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--garis); background:transparent; color:var(--fg); cursor:pointer; }
+  button.utama { background:var(--hijau); color:var(--bg); border-color:var(--hijau); }
+  button.bahaya { border-color:var(--merah); color:var(--merah); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  input, textarea { font:inherit; width:100%; padding:9px; border-radius:8px; border:1px solid var(--garis); background:transparent; color:var(--fg); }
+  label { display:block; margin:10px 0 4px; font-size:14px; color:var(--redup); }
+  .pesan { padding:10px 12px; border-radius:8px; border:1px solid var(--garis); margin:12px 0; }
+  .pesan.galat { border-color:var(--merah); color:var(--merah); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--garis); vertical-align:top; }
+  .redup { color:var(--redup); font-size:14px; }
+  .sembunyi { display:none; }
+  .aksi { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Panel Langganan</h1>
+  <div id="bar-akun" class="sembunyi">
+    <span class="redup" id="email-admin"></span>
+    <button id="keluar">Keluar</button>
+  </div>
+</header>
+
+<main>
+  <div id="pesan"></div>
+
+  <section id="layar-masuk">
+    <h2>Masuk</h2>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username">
+    <label for="sandi">Sandi</label>
+    <input id="sandi" type="password" autocomplete="current-password">
+    <div class="aksi"><button class="utama" id="masuk">Masuk</button></div>
+  </section>
+
+  <div id="layar-utama" class="sembunyi">
+    <section>
+      <h2>Bukti masuk (<span id="jml-bukti">0</span>)</h2>
+      <div id="daftar-bukti"></div>
+    </section>
+
+    <section>
+      <h2>Gerai</h2>
+      <table><thead><tr><th>Gerai</th><th>Status</th><th>Siklus</th></tr></thead>
+      <tbody id="daftar-tenant"></tbody></table>
+    </section>
+
+    <section>
+      <h2>Riwayat keputusan</h2>
+      <table><thead><tr><th>Waktu</th><th>Keputusan</th><th>Oleh</th><th></th></tr></thead>
+      <tbody id="daftar-keputusan"></tbody></table>
+    </section>
+  </div>
+</main>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const URL_SUPABASE = 'https://fpyamxztplpbiszttfoi.supabase.co'
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZweWFteHp0cGxwYmlzenR0Zm9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NjU3MzcsImV4cCI6MjEwMjI0MTczN30.CiRinf7qLQx6Xtx0OSqLKb9mP8pVhFs16enCzyy4sG0'
+const sb = createClient(URL_SUPABASE, ANON)
+
+const $ = (id) => document.getElementById(id)
+const rupiah = (n) => 'Rp ' + Number(n).toLocaleString('id-ID')
+
+function pesan(teks, galat = false) {
+  $('pesan').innerHTML = teks ? `<div class="pesan ${galat ? 'galat' : ''}">${teks}</div>` : ''
+}
+
+/** Memanggil Edge Function dengan JWT sesi. Seluruh data hanya lewat sini. */
+async function panggil(fungsi, isi = {}) {
+  const { data: { session } } = await sb.auth.getSession()
+  if (!session) throw new Error('Sesi habis. Masuk lagi.')
+  const r = await fetch(`${URL_SUPABASE}/functions/v1/${fungsi}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(isi),
+  })
+  const badan = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(badan.error || `HTTP ${r.status}`)
+  return badan
+}
+
+function gambarBukti(b) {
+  return b.gambar
+    ? `<img class="bukti" src="${b.gambar}" alt="Bukti transfer ${b.gerai}">`
+    : `<p class="redup">Gambar tidak dapat dimuat.</p>`
+}
+
+function kartuBukti(b) {
+  return `
+    <div class="kartu" data-proof="${b.proofId}">
+      <div class="baris">
+        <div>
+          <strong>${b.gerai}</strong><br>
+          <span class="redup">${b.pemilik} · gerai ${b.statusGerai}</span>
+        </div>
+        <div class="nominal">${rupiah(b.nominal)}</div>
+      </div>
+      <p class="redup">Jatuh tempo ${b.jatuhTempo} · diunggah ${new Date(b.diunggah).toLocaleString('id-ID')}</p>
+      ${gambarBukti(b)}
+      <label>Alasan (wajib bila menolak)</label>
+      <textarea rows="2" class="alasan" placeholder="mis. nominal tidak cocok"></textarea>
+      <div class="aksi">
+        <button class="utama setuju">Setujui</button>
+        <button class="bahaya tolak">Tolak</button>
+      </div>
+    </div>`
+}
+
+function barisKeputusan(k) {
+  const batal = k.dibatalkan_pada
+    ? `<span class="redup">dibatalkan oleh ${k.dibatalkan_oleh}</span>`
+    : `<button class="bahaya batal" data-id="${k.id}">Batalkan</button>`
+  return `<tr>
+    <td>${new Date(k.diputuskan_pada).toLocaleString('id-ID')}</td>
+    <td>${k.keputusan}</td>
+    <td class="redup">${k.diputuskan_oleh}</td>
+    <td>${batal}</td>
+  </tr>`
+}
+
+async function muat() {
+  pesan('Memuat…')
+  const d = await panggil('admin-daftar')
+  $('email-admin').textContent = d.admin
+  $('jml-bukti').textContent = d.bukti.length
+  $('daftar-bukti').innerHTML = d.bukti.length
+    ? d.bukti.map(kartuBukti).join('')
+    : '<p class="redup">Tidak ada bukti yang menunggu.</p>'
+  $('daftar-tenant').innerHTML = d.tenants.map((t) =>
+    `<tr><td>${t.nama}<br><span class="redup">${t.owner_name}</span></td>
+     <td>${t.status}</td><td class="redup">${t.cycle_start} → ${t.cycle_end}</td></tr>`).join('')
+  $('daftar-keputusan').innerHTML = d.keputusan.length
+    ? d.keputusan.map(barisKeputusan).join('')
+    : '<tr><td colspan="4" class="redup">Belum ada keputusan.</td></tr>'
+  pesan('')
+}
+
+document.addEventListener('click', async (e) => {
+  const t = e.target
+  if (!(t instanceof HTMLElement)) return
+
+  if (t.classList.contains('setuju') || t.classList.contains('tolak')) {
+    const kartu = t.closest('[data-proof]')
+    const proofId = kartu.dataset.proof
+    const keputusan = t.classList.contains('setuju') ? 'setuju' : 'tolak'
+    const alasan = kartu.querySelector('.alasan').value.trim()
+    if (keputusan === 'tolak' && !alasan) return pesan('Penolakan wajib menyertakan alasan.', true)
+    if (!confirm(keputusan === 'setuju'
+      ? 'Setujui pembayaran ini? Gerai akan TERBUKA dan siklus 30 hari baru dimulai hari ini.'
+      : 'Tolak bukti ini? Alasannya akan tampil di aplikasi pemilik gerai.')) return
+
+    kartu.querySelectorAll('button').forEach((b) => (b.disabled = true))
+    try { await panggil('admin-putuskan', { proofId, keputusan, alasan }); await muat() }
+    catch (err) { pesan(err.message, true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
+  }
+
+  if (t.classList.contains('batal')) {
+    // Kalimat penuh, bukan "Anda yakin?". Pemilik gerai yang sempat membuka aplikasinya akan
+    // melihatnya mati lagi tanpa ia melakukan apa pun — itu harus disebut sebelum diklik.
+    if (!confirm(
+      'Batalkan keputusan ini?\n\n' +
+      'Gerai akan kembali ke keadaan SEBELUM keputusan — termasuk TERKUNCI lagi bila sebelumnya ' +
+      'terkunci. Bila pemiliknya sempat membuka aplikasinya, ia akan melihatnya mati lagi tanpa ' +
+      'melakukan apa pun.\n\nUang yang sudah masuk rekening TIDAK ikut dikembalikan.'
+    )) return
+    t.disabled = true
+    try { await panggil('admin-batal', { keputusanId: t.dataset.id }); await muat() }
+    catch (err) { pesan(err.message, true); t.disabled = false }
+  }
+})
+
+$('masuk').addEventListener('click', async () => {
+  pesan('Masuk…')
+  const { error } = await sb.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('sandi').value,
+  })
+  if (error) return pesan(error.message, true)
+  await tampilkan()
+})
+
+$('keluar').addEventListener('click', async () => { await sb.auth.signOut(); location.reload() })
+
+async function tampilkan() {
+  const { data: { session } } = await sb.auth.getSession()
+  const masuk = Boolean(session)
+  $('layar-masuk').classList.toggle('sembunyi', masuk)
+  $('layar-utama').classList.toggle('sembunyi', !masuk)
+  $('bar-akun').classList.toggle('sembunyi', !masuk)
+  if (!masuk) return
+  try { await muat() } catch (e) {
+    // Akun sah tetapi bukan admin berakhir di sini. Kalimatnya menyebut kemungkinan itu, sebab
+    // "tidak berhak" tanpa penjelasan membuat orang mengira sandinya salah dan mencoba terus.
+    pesan(`${e.message} — bila baru dibuat, akun ini mungkin belum terdaftar sebagai admin.`, true)
+    $('layar-utama').classList.add('sembunyi')
+  }
+}
+
+tampilkan()
+</script>
+</body>
+</html>

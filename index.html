@@ -292,7 +292,7 @@ document.addEventListener('click', async (e) => {
       pesan(`Kode untuk ${lolos(catatan)}: <strong style="font-size:1.4em">${lolos(d.dibacakan)}</strong>` +
         ` — berlaku sampai ${new Date(d.kadaluarsaPada).toLocaleDateString('id-ID')}. Sekali pakai.`)
       await muatKode()
-    } catch (err) { pesan(err.message, true) }
+    } catch (err) { pesan(lolos(err.message), true) }
     finally { t.disabled = false }
     return
   }
@@ -309,7 +309,7 @@ document.addEventListener('click', async (e) => {
 
     kartu.querySelectorAll('button').forEach((b) => (b.disabled = true))
     try { await panggil('admin-putuskan', { proofId, keputusan, alasan }); await muat() }
-    catch (err) { pesan(err.message, true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
+    catch (err) { pesan(lolos(err.message), true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
   }
 
   if (t.classList.contains('setuju-daftar') || t.classList.contains('tolak-daftar')) {
@@ -327,7 +327,7 @@ document.addEventListener('click', async (e) => {
 
     kartu.querySelectorAll('button').forEach((b) => (b.disabled = true))
     try { await panggil('admin-putuskan-daftar', { pendaftaranId, keputusan, alasan }); await muat() }
-    catch (err) { pesan(err.message, true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
+    catch (err) { pesan(lolos(err.message), true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
   }
 
   if (t.classList.contains('batal')) {
@@ -341,7 +341,7 @@ document.addEventListener('click', async (e) => {
     )) return
     t.disabled = true
     try { await panggil('admin-batal', { keputusanId: t.dataset.id }); await muat() }
-    catch (err) { pesan(err.message, true); t.disabled = false }
+    catch (err) { pesan(lolos(err.message), true); t.disabled = false }
   }
 })
 
@@ -376,9 +376,9 @@ async function tampilkan() {
     const jaringan = e instanceof TypeError || /failed to fetch|networkerror/i.test(e.message)
     pesan(
       jaringan
-        ? `Tidak dapat menghubungi server (${e.message}). Ini BUKAN soal hak akses — ` +
+        ? `Tidak dapat menghubungi server (${lolos(e.message)}). Ini BUKAN soal hak akses — ` +
           'permintaannya tidak pernah sampai. Periksa sambungan internet.'
-        : `${e.message} — bila akun ini baru dibuat, ia mungkin belum terdaftar sebagai admin.`,
+        : `${lolos(e.message)} — bila akun ini baru dibuat, ia mungkin belum terdaftar sebagai admin.`,
       true,
     )
     $('layar-utama').classList.add('sembunyi')

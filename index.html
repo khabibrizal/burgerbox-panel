@@ -229,9 +229,22 @@ async function tampilkan() {
   $('bar-akun').classList.toggle('sembunyi', !masuk)
   if (!masuk) return
   try { await muat() } catch (e) {
-    // Akun sah tetapi bukan admin berakhir di sini. Kalimatnya menyebut kemungkinan itu, sebab
-    // "tidak berhak" tanpa penjelasan membuat orang mengira sandinya salah dan mencoba terus.
-    pesan(`${e.message} — bila baru dibuat, akun ini mungkin belum terdaftar sebagai admin.`, true)
+    // **Dua kegagalan yang sangat berbeda, dan menyamakannya sudah menyesatkan sekali.**
+    //
+    // "Failed to fetch" berarti permintaannya TIDAK PERNAH sampai ke server — lazimnya CORS atau
+    // jaringan. Versi pertama pesan ini menuduh "akun belum terdaftar sebagai admin" untuk kasus
+    // itu juga, dan tuduhan itu mengirim orang memeriksa tabel `admins` yang sebenarnya sudah
+    // benar.
+    //
+    // "tidak berhak" datang DARI server, dan barulah itu soal hak akses.
+    const jaringan = e instanceof TypeError || /failed to fetch|networkerror/i.test(e.message)
+    pesan(
+      jaringan
+        ? `Tidak dapat menghubungi server (${e.message}). Ini BUKAN soal hak akses — ` +
+          'permintaannya tidak pernah sampai. Periksa sambungan internet.'
+        : `${e.message} — bila akun ini baru dibuat, ia mungkin belum terdaftar sebagai admin.`,
+      true,
+    )
     $('layar-utama').classList.add('sembunyi')
   }
 }

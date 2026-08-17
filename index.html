@@ -73,6 +73,11 @@
 
   <div id="layar-utama" class="sembunyi">
     <section>
+      <h2>Pendaftaran gerai baru (<span id="jml-daftar">0</span>)</h2>
+      <div id="daftar-pendaftaran"></div>
+    </section>
+
+    <section>
       <h2>Bukti masuk (<span id="jml-bukti">0</span>)</h2>
       <div id="daftar-bukti"></div>
     </section>
@@ -146,6 +151,28 @@ function kartuBukti(b) {
     </div>`
 }
 
+function kartuPendaftaran(p) {
+  // Nomor HP ditampilkan sebagai tautan WhatsApp, dan itu PENGGANTI OTP di rancangan ini:
+  // tidak ada yang membuktikan nomornya benar kecuali admin menghubunginya sebelum memutuskan.
+  return `
+    <div class="kartu" data-daftar="${p.id}">
+      <div class="baris">
+        <div>
+          <strong>${p.nama_gerai}</strong><br>
+          <span class="redup">${p.nama_pemilik}</span>
+        </div>
+        <a href="https://wa.me/${p.no_hp}" target="_blank" rel="noopener">${p.no_hp}</a>
+      </div>
+      <p class="redup">Mendaftar ${new Date(p.didaftarkan_pada).toLocaleString('id-ID')}</p>
+      <label>Alasan (wajib bila menolak)</label>
+      <textarea rows="2" class="alasan" placeholder="mis. nomor tidak dapat dihubungi"></textarea>
+      <div class="aksi">
+        <button class="utama setuju-daftar">Setujui &amp; buat gerai</button>
+        <button class="bahaya tolak-daftar">Tolak</button>
+      </div>
+    </div>`
+}
+
 function barisKeputusan(k) {
   const batal = k.dibatalkan_pada
     ? `<span class="redup">dibatalkan oleh ${k.dibatalkan_oleh}</span>`
@@ -162,6 +189,10 @@ async function muat() {
   pesan('Memuat…')
   const d = await panggil('admin-daftar')
   $('email-admin').textContent = d.admin
+  $('jml-daftar').textContent = d.pendaftaran.length
+  $('daftar-pendaftaran').innerHTML = d.pendaftaran.length
+    ? d.pendaftaran.map(kartuPendaftaran).join('')
+    : '<p class="redup">Tidak ada pendaftaran yang menunggu.</p>'
   $('jml-bukti').textContent = d.bukti.length
   $('daftar-bukti').innerHTML = d.bukti.length
     ? d.bukti.map(kartuBukti).join('')
@@ -191,6 +222,24 @@ document.addEventListener('click', async (e) => {
 
     kartu.querySelectorAll('button').forEach((b) => (b.disabled = true))
     try { await panggil('admin-putuskan', { proofId, keputusan, alasan }); await muat() }
+    catch (err) { pesan(err.message, true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
+  }
+
+  if (t.classList.contains('setuju-daftar') || t.classList.contains('tolak-daftar')) {
+    const kartu = t.closest('[data-daftar]')
+    const pendaftaranId = kartu.dataset.daftar
+    const keputusan = t.classList.contains('setuju-daftar') ? 'setuju' : 'tolak'
+    const alasan = kartu.querySelector('.alasan').value.trim()
+    if (keputusan === 'tolak' && !alasan) return pesan('Penolakan wajib menyertakan alasan.', true)
+    // Kalimat penuh, bukan "Anda yakin?": menyetujui MELAHIRKAN gerai yang langsung dapat
+    // berjualan, dan tagihan pertamanya baru terbit 30 hari lagi.
+    if (!confirm(keputusan === 'setuju'
+      ? 'Setujui pendaftaran ini?\n\nSatu gerai baru akan DIBUAT dan langsung dapat berjualan. ' +
+        'Tagihan pertamanya terbit 30 hari lagi.'
+      : 'Tolak pendaftaran ini? Alasannya akan tampil di aplikasi pendaftar.')) return
+
+    kartu.querySelectorAll('button').forEach((b) => (b.disabled = true))
+    try { await panggil('admin-putuskan-daftar', { pendaftaranId, keputusan, alasan }); await muat() }
     catch (err) { pesan(err.message, true); kartu.querySelectorAll('button').forEach((b) => (b.disabled = false)) }
   }
 

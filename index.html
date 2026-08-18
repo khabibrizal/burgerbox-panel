@@ -97,6 +97,31 @@
       <tbody id="daftar-kode"></tbody></table>
     </section>
 
+    <!--
+      Tarif langganan. Ditaruh sesudah hal-hal yang dikerjakan HARIAN (pendaftaran, kode) sebab ia
+      diubah beberapa bulan sekali — tetapi tetap di atas riwayat, sebab akibatnya menyentuh SELURUH
+      gerai sekaligus dan bukan satu.
+    -->
+    <section>
+      <h2>Tarif langganan</h2>
+      <div id="tarif-berlaku" class="kartu"></div>
+
+      <label for="tarif-persen">Persentase dari omzet bersih (%)</label>
+      <input id="tarif-persen" type="number" step="0.01" min="0.1" max="20" placeholder="2">
+      <label for="tarif-batas">Batas maksimal per siklus (Rp)</label>
+      <input id="tarif-batas" type="number" step="1000" min="1000" placeholder="100000">
+      <label for="tarif-mulai">Berlaku mulai (kosongkan = sekarang)</label>
+      <input id="tarif-mulai" type="date">
+      <p class="redup">
+        Tarif lama TIDAK ditimpa — riwayatnya disimpan, dan tagihan yang sudah terbit tetap memakai
+        tarif saat ia terbit.
+      </p>
+      <div class="aksi"><button class="utama" id="simpan-tarif">Setel tarif</button></div>
+
+      <table><thead><tr><th>Berlaku</th><th>Tarif</th><th>Batas</th><th>Oleh</th><th></th></tr></thead>
+      <tbody id="daftar-tarif"></tbody></table>
+    </section>
+
     <section>
       <h2>Bukti masuk (<span id="jml-bukti">0</span>)</h2>
       <div id="daftar-bukti"></div>
@@ -251,6 +276,55 @@ async function muatKode() {
     : '<tr><td colspan="4" class="redup">Belum ada kode.</td></tr>'
 }
 
+/**
+ * Kartu tarif yang BERLAKU, beserta contoh tagihannya dalam RUPIAH.
+ *
+ * **Contoh rupiahnya yang membuat salah setel terlihat.** "2%" tidak terasa salah saat dibaca;
+ * "gerai beromzet Rp 20.000.000 ditagih Rp 4.000.000" terasa salah seketika. Angkanya dihitung
+ * server dengan `hitungFee` yang sama dipakai `tutup-siklus`, jadi yang terpampang adalah angka yang
+ * benar-benar akan ditagihkan.
+ */
+function kartuTarifBerlaku(d) {
+  if (!d.berlaku) {
+    return '<p class="redup">Belum ada tarif yang berlaku. Setel di bawah.</p>'
+  }
+  const b = d.berlaku
+  const contoh = d.contoh
+    .map((c) => `<tr><td class="redup">Omzet ${rupiah(c.omzet)}</td><td>${rupiah(c.tagihan)}</td></tr>`)
+    .join('')
+  return `
+    <div class="baris">
+      <div><strong>Berlaku sekarang: ${lolos(b.persen)}% dari omzet bersih</strong><br>
+        <span class="redup">Batas maksimal ${rupiah(b.batas)} per siklus</span></div>
+      <div class="redup">sejak ${new Date(b.berlakuMulai).toLocaleDateString('id-ID')}</div>
+    </div>
+    <table style="margin-top:10px"><tbody>${contoh}</tbody></table>`
+}
+
+function barisTarif(t) {
+  // Yang TERJADWAL dapat dibatalkan; yang sudah berlaku tidak — menghapusnya membuat tagihan yang
+  // sudah terbit merujuk tarif yang tidak pernah ada dalam catatan.
+  const aksi = t.terjadwal
+    ? `<button class="bahaya batal-tarif" data-id="${lolos(t.id)}">Batalkan</button>`
+    : '<span class="redup">—</span>'
+  const kapan = new Date(t.berlakuMulai).toLocaleDateString('id-ID')
+  return `<tr>
+    <td>${kapan}${t.terjadwal ? ' <span class="redup">(terjadwal)</span>' : ''}</td>
+    <td>${lolos(t.persen)}%</td>
+    <td>${rupiah(t.batas)}</td>
+    <td class="redup">${lolos(t.dibuatOleh)}</td>
+    <td>${aksi}</td>
+  </tr>`
+}
+
+async function muatTarif() {
+  const d = await panggil('admin-tarif', { aksi: 'daftar' })
+  $('tarif-berlaku').innerHTML = kartuTarifBerlaku(d)
+  $('daftar-tarif').innerHTML = d.baris.length
+    ? d.baris.map(barisTarif).join('')
+    : '<tr><td colspan="5" class="redup">Belum ada tarif.</td></tr>'
+}
+
 async function muat() {
   pesan('Memuat…')
   const d = await panggil('admin-daftar')
@@ -271,12 +345,60 @@ async function muat() {
     ? d.keputusan.map(barisKeputusan).join('')
     : '<tr><td colspan="4" class="redup">Belum ada keputusan.</td></tr>'
   await muatKode()
+  await muatTarif()
   pesan('')
 }
 
 document.addEventListener('click', async (e) => {
   const t = e.target
   if (!(t instanceof HTMLElement)) return
+
+  if (t.id === 'simpan-tarif') {
+    const persen = Number($('tarif-persen').value)
+    const batas = Number($('tarif-batas').value)
+    const mulai = $('tarif-mulai').value
+    if (!persen || !batas) return pesan('Persentase dan batas maksimal wajib diisi.', true)
+
+    // **Konfirmasinya menyebut RUPIAH pada omzet nyata, bukan persennya.** Mengetik 20 padahal
+    // maksudnya 2 melipatkan tagihan SELURUH gerai sepuluh kali, dan "20%" tidak terasa salah saat
+    // dibaca. Angka rupiah yang melonjak terasa salah seketika.
+    const contoh = [5000000, 20000000, 50000000]
+      .map((o) => `  omzet ${rupiah(o)} → ${rupiah(Math.min(Math.round(o * persen / 100), batas))}`)
+      .join('
+')
+    const kapan = mulai ? `mulai ${mulai}` : 'MULAI SEKARANG'
+    if (!confirm(
+      `Setel tarif ${persen}% dengan batas ${rupiah(batas)}, ${kapan}?
+
+` +
+      `Tagihan yang akan terbit:
+${contoh}
+
+` +
+      'Berlaku untuk SELURUH gerai. Tagihan yang sudah terbit tidak berubah.'
+    )) return
+
+    t.disabled = true
+    try {
+      const d = await panggil('admin-tarif', { aksi: 'buat', persen, batas, berlakuMulai: mulai })
+      $('tarif-persen').value = ''
+      $('tarif-batas').value = ''
+      $('tarif-mulai').value = ''
+      pesan(`Tarif ${lolos(persen)}% (batas ${rupiah(batas)}) tersimpan, berlaku ` +
+        `${new Date(d.berlakuMulai).toLocaleDateString('id-ID')}.`)
+      await muatTarif()
+    } catch (err) { pesan(lolos(err.message), true) }
+    finally { t.disabled = false }
+    return
+  }
+
+  if (t.classList.contains('batal-tarif')) {
+    if (!confirm('Batalkan tarif terjadwal ini? Tarif yang berlaku sekarang tidak berubah.')) return
+    t.disabled = true
+    try { await panggil('admin-tarif', { aksi: 'batal', id: t.dataset.id }); await muatTarif() }
+    catch (err) { pesan(lolos(err.message), true); t.disabled = false }
+    return
+  }
 
   if (t.id === 'buat-kode') {
     const catatan = $('kode-catatan').value.trim()

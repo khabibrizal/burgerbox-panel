@@ -364,8 +364,7 @@ document.addEventListener('click', async (e) => {
     // dibaca. Angka rupiah yang melonjak terasa salah seketika.
     const contoh = [5000000, 20000000, 50000000]
       .map((o) => `  omzet ${rupiah(o)} → ${rupiah(Math.min(Math.round(o * persen / 100), batas))}`)
-      .join('
-')
+      .join('\n')
     const kapan = mulai ? `mulai ${mulai}` : 'MULAI SEKARANG'
     if (!confirm(
       `Setel tarif ${persen}% dengan batas ${rupiah(batas)}, ${kapan}?

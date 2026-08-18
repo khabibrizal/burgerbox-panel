@@ -47,6 +47,26 @@
   .redup { color:var(--redup); font-size:14px; }
   .sembunyi { display:none; }
   .aksi { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+
+  /*
+    Menu tab. Membungkus ke baris berikutnya di layar sempit — panel ini dibuka dari PONSEL, dan
+    menu yang meluber ke samping menyembunyikan tab terakhir tanpa tanda apa pun.
+  */
+  nav#menu { display:flex; gap:6px; flex-wrap:wrap; padding:10px 16px; border-bottom:1px solid var(--garis); }
+  nav#menu button { border-color:transparent; padding:8px 12px; }
+
+  /*
+    Tab aktif dibedakan TEBAL dan GARIS BAWAH, bukan warna saja. Pelajaran yang sudah dibayar di
+    pemilih sumber pengeluaran: pembeda yang hanya warna tidak terbaca oleh yang buta warna, dan
+    tidak terbaca siapa pun di bawah matahari.
+  */
+  nav#menu button[aria-current="page"] {
+    font-weight:600; border-bottom:2px solid var(--hijau); border-radius:8px 8px 0 0; color:var(--fg);
+  }
+  nav#menu .lencana {
+    display:inline-block; min-width:20px; margin-left:6px; padding:0 6px; border-radius:10px;
+    background:var(--merah); color:var(--bg); font-size:12px; font-weight:600; text-align:center;
+  }
 </style>
 </head>
 <body>
@@ -58,6 +78,19 @@
     <button id="keluar">Keluar</button>
   </div>
 </header>
+
+<!--
+  Menu tab. Seluruh bagian tetap DIMUAT sekali lewat `muat()`; yang berpindah hanya yang tampil.
+  Memuat per tab akan membuat antrean bukti dan daftar gerai berasal dari saat yang berbeda — dan
+  bukti yang baru diputuskan masih tampil menunggu di tab yang belum disegarkan.
+-->
+<nav id="menu" class="sembunyi">
+  <button data-tab="daftar" aria-current="page">Pendaftaran gerai baru<span class="lencana sembunyi" id="lencana-daftar">0</span></button>
+  <button data-tab="kode">Buat kode</button>
+  <button data-tab="tarif">Tarif langganan</button>
+  <button data-tab="gerai">Gerai</button>
+  <button data-tab="bukti">Bukti masuk<span class="lencana sembunyi" id="lencana-bukti">0</span></button>
+</nav>
 
 <main>
   <div id="pesan"></div>
@@ -72,7 +105,7 @@
   </section>
 
   <div id="layar-utama" class="sembunyi">
-    <section>
+    <section id="sec-daftar" class="tab">
       <h2>Pendaftaran gerai baru (<span id="jml-daftar">0</span>)</h2>
       <div id="daftar-pendaftaran"></div>
     </section>
@@ -82,7 +115,7 @@
       sebelum menelepon calon gerai, jadi ia dekat dengan yang sedang dikerjakan admin — bukan
       terkubur di dasar halaman bersama riwayat.
     -->
-    <section>
+    <section id="sec-kode" class="tab sembunyi">
       <h2>Kode undangan</h2>
       <p class="redup">
         Calon gerai tidak dapat mendaftar tanpa kode. Buat satu kode untuk satu gerai, lalu
@@ -102,7 +135,7 @@
       diubah beberapa bulan sekali — tetapi tetap di atas riwayat, sebab akibatnya menyentuh SELURUH
       gerai sekaligus dan bukan satu.
     -->
-    <section>
+    <section id="sec-tarif" class="tab sembunyi">
       <h2>Tarif langganan</h2>
       <div id="tarif-berlaku" class="kartu"></div>
 
@@ -122,22 +155,27 @@
       <tbody id="daftar-tarif"></tbody></table>
     </section>
 
-    <section>
+    <section id="sec-bukti" class="tab sembunyi">
       <h2>Bukti masuk (<span id="jml-bukti">0</span>)</h2>
       <div id="daftar-bukti"></div>
+
+      <!--
+        Riwayat keputusan ditaruh DI SINI, bukan sebagai tab tersendiri: ia bagian dari alur yang
+        sama, dan jalan BATAL sebuah keputusan hanya berguna bila ia bersebelahan dengan tempat
+        keputusan itu dibuat. Tab terpisah membuat pembatalan menjadi sesuatu yang harus dicari.
+      -->
+      <h2 style="margin-top:28px">Riwayat keputusan</h2>
+      <table><thead><tr><th>Waktu</th><th>Keputusan</th><th>Oleh</th><th></th></tr></thead>
+      <tbody id="daftar-keputusan"></tbody></table>
     </section>
 
-    <section>
+    <section id="sec-gerai" class="tab sembunyi">
       <h2>Gerai</h2>
       <table><thead><tr><th>Gerai</th><th>Status</th><th>Siklus</th></tr></thead>
       <tbody id="daftar-tenant"></tbody></table>
     </section>
 
-    <section>
-      <h2>Riwayat keputusan</h2>
-      <table><thead><tr><th>Waktu</th><th>Keputusan</th><th>Oleh</th><th></th></tr></thead>
-      <tbody id="daftar-keputusan"></tbody></table>
-    </section>
+
   </div>
 </main>
 
@@ -325,15 +363,50 @@ async function muatTarif() {
     : '<tr><td colspan="5" class="redup">Belum ada tarif.</td></tr>'
 }
 
+/**
+ * Memindahkan tab. Yang berpindah hanya YANG TAMPIL — datanya sudah dimuat seluruhnya oleh `muat()`.
+ *
+ * `aria-current` dipakai sebagai penanda aktif, bukan kelas buatan sendiri: pembaca layar
+ * mengumumkannya, dan gayanya cukup menyandar pada atribut yang sama sehingga tidak ada dua sumber
+ * kebenaran tentang tab mana yang sedang terbuka.
+ */
+function pilihTab(nama) {
+  document.querySelectorAll('nav#menu button').forEach((b) => {
+    if (b.dataset.tab === nama) b.setAttribute('aria-current', 'page')
+    else b.removeAttribute('aria-current')
+  })
+  document.querySelectorAll('section.tab').forEach((sec) => {
+    sec.classList.toggle('sembunyi', sec.id !== 'sec-' + nama)
+  })
+  // Halaman digulirkan ke atas: tab yang berpindah sementara gulirannya tertinggal di tengah
+  // membuat isi barunya seolah kosong.
+  window.scrollTo({ top: 0 })
+}
+
+/**
+ * Lencana jumlah pada tab yang berisi ANTREAN.
+ *
+ * Hanya dua tab yang punya: pendaftaran dan bukti. Keduanya menunggu keputusan admin, dan tab yang
+ * tersembunyi tanpa lencana membuat antrean menumpuk tanpa ada yang tahu — persis kerugian yang
+ * ditimbulkan oleh menyembunyikan bagian di balik tab.
+ */
+function setelLencana(id, jumlah) {
+  const el = $(id)
+  el.textContent = jumlah
+  el.classList.toggle('sembunyi', jumlah === 0)
+}
+
 async function muat() {
   pesan('Memuat…')
   const d = await panggil('admin-daftar')
   $('email-admin').textContent = d.admin
   $('jml-daftar').textContent = d.pendaftaran.length
+  setelLencana('lencana-daftar', d.pendaftaran.length)
   $('daftar-pendaftaran').innerHTML = d.pendaftaran.length
     ? d.pendaftaran.map(kartuPendaftaran).join('')
     : '<p class="redup">Tidak ada pendaftaran yang menunggu.</p>'
   $('jml-bukti').textContent = d.bukti.length
+  setelLencana('lencana-bukti', d.bukti.length)
   $('daftar-bukti').innerHTML = d.bukti.length
     ? d.bukti.map(kartuBukti).join('')
     : '<p class="redup">Tidak ada bukti yang menunggu.</p>'
@@ -352,6 +425,11 @@ async function muat() {
 document.addEventListener('click', async (e) => {
   const t = e.target
   if (!(t instanceof HTMLElement)) return
+
+  if (t.dataset.tab) {
+    pilihTab(t.dataset.tab)
+    return
+  }
 
   if (t.id === 'simpan-tarif') {
     const persen = Number($('tarif-persen').value)
@@ -484,7 +562,13 @@ async function tampilkan() {
   $('layar-masuk').classList.toggle('sembunyi', masuk)
   $('layar-utama').classList.toggle('sembunyi', !masuk)
   $('bar-akun').classList.toggle('sembunyi', !masuk)
+  $('menu').classList.toggle('sembunyi', !masuk)
   if (!masuk) return
+
+  // Selalu kembali ke tab pertama saat sesi dimulai. Tanpa ini, tab yang terbuka sebelum logout
+  // bertahan di sesi berikutnya — dan admin berikutnya mendarat di halaman yang bukan pintu
+  // masuknya, mengira antrean pendaftarannya kosong.
+  pilihTab('daftar')
   try { await muat() } catch (e) {
     // **Dua kegagalan yang sangat berbeda, dan menyamakannya sudah menyesatkan sekali.**
     //
@@ -502,7 +586,10 @@ async function tampilkan() {
         : `${lolos(e.message)} — bila akun ini baru dibuat, ia mungkin belum terdaftar sebagai admin.`,
       true,
     )
+    // Menu ikut disembunyikan: tab yang masih dapat ditekan atas data yang gagal dimuat hanya
+    // memindahkan halaman kosong ke halaman kosong lain, dan itu terbaca sebagai kerusakan kedua.
     $('layar-utama').classList.add('sembunyi')
+    $('menu').classList.add('sembunyi')
   }
 }
 

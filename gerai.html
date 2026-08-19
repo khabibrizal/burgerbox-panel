@@ -115,6 +115,8 @@
 
     <div class="kartu" id="kartuMaster"></div>
 
+    <div class="kartu" id="kartuPengguna"></div>
+
     <div class="kartu">
       <div class="baris" style="margin-bottom:10px">
         <label>Dari<input id="dari" type="date"></label>
@@ -368,12 +370,89 @@ function selisihKas(n) {
 }
 
 /** Data master terakhir yang dimuat, dipakai formulir ubah tanpa memanggil server lagi. */
-let master = { jenis: [], produk: [], channel: [], konflik: [], bekuKarenaBentrok: 0 }
+let master = { jenis: [], produk: [], channel: [], pengguna: [], konflik: [], bekuKarenaBentrok: 0 }
 
 async function muatMaster() {
   master = await panggilMaster({ aksi: 'baca' })
   isiKonflik()
   isiMaster()
+  isiPengguna()
+}
+
+/**
+ * Kartu PENGGUNA — kasir dan admin gerai.
+ *
+ * **Tidak ada apa pun soal PIN di kartu ini, dan itu keputusan pemilik yang diambil dengan sadar.**
+ * PIN kasir 4-6 digit; hash-nya dapat ditebak habis dalam milidetik bila bocor, jadi bahannya tidak
+ * pernah meninggalkan tablet. Yang dapat dilakukan dari sini: mengganti nama dan MENONAKTIFKAN. Yang
+ * tidak: menambah kasir baru dan me-reset PIN — keduanya harus disentuh di tablet.
+ *
+ * Kalimat itu ditulis DI HALAMAN, bukan cuma di kode. Pemilik yang mencari tombol "tambah kasir" lalu
+ * tidak menemukannya akan menyimpulkan halamannya rusak; yang membaca sebabnya tahu harus ke tablet.
+ */
+function isiPengguna() {
+  const daftar = master.pengguna || []
+  const ownerAktif = daftar.filter((p) => p.peran === 'owner' && p.aktif).length
+
+  const baris = daftar.map((p) => {
+    // Owner aktif TERAKHIR tidak boleh dinonaktifkan: tabletnya akan kehilangan satu-satunya orang yang
+    // berhak mengelola pengguna, dan pemulihannya menuntut pasang ulang beserta kehilangan data. Server
+    // menolaknya juga; tombol yang mati di sini hanya supaya pemilik tidak menekan sesuatu yang pasti
+    // gagal. Yang MENJAGA adalah server dan tablet, bukan tombol ini.
+    const ownerTerakhir = p.peran === 'owner' && p.aktif && ownerAktif <= 1
+    return '<tr' + (p.aktif ? '' : ' class="redup"') + '>' +
+      `<td>${lolos(p.nama)}</td>` +
+      `<td>${lolos(p.peran)}</td>` +
+      `<td>${p.aktif ? 'aktif' : '<span class="void">nonaktif</span>'}</td>` +
+      `<td class="redup">${lolos(p.diubah_oleh)} \u00b7 ${lolos(waktuWib(p.diubah_pada))}</td>` +
+      '<td>' +
+      `<button class="ubahPengguna" data-uid="${lolos(p.uid)}">Ubah nama</button> ` +
+      (ownerTerakhir
+        ? '<button disabled title="Minimal satu owner aktif harus tetap ada">Nonaktifkan</button>'
+        : `<button class="aktifPengguna" data-uid="${lolos(p.uid)}" data-aktif="${p.aktif ? '0' : '1'}">` +
+          `${p.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button>`) +
+      '</td></tr>'
+  }).join('')
+
+  $('kartuPengguna').innerHTML =
+    '<h2 style="margin:0 0 4px;font-size:15px">Pengguna tablet</h2>' +
+    '<p class="redup" style="margin:0 0 12px">Dari sini Anda dapat mengganti nama dan ' +
+    '<b>menonaktifkan</b> \u2014 kasir yang nonaktif tidak dapat login lagi. <b>PIN tidak ada di sini ' +
+    'dan tidak pernah dikirim ke server</b>, jadi menambah kasir baru dan me-reset PIN harus dilakukan ' +
+    'di tablet. Peran juga hanya dapat diubah di tablet.</p>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Nama</th><th>Peran</th><th>Status</th>' +
+    '<th>Terakhir diubah</th><th></th></tr></thead>' +
+    `<tbody>${baris}</tbody></table></div>` +
+    '<div id="formPengguna" class="sembunyi" style="margin-top:10px"></div>'
+}
+
+/** Formulir pengguna: HANYA nama. Peran dan PIN tidak dapat diubah dari panel. */
+function bukaFormulirPengguna(uid) {
+  const p = (master.pengguna || []).find((x) => x.uid === uid)
+  if (!p) return
+  $('formPengguna').innerHTML =
+    '<div class="baris" style="flex-wrap:wrap;gap:8px">' +
+    `<label>Nama<input name="nama" type="text" value="${lolos(p.nama)}"></label>` +
+    `<button class="simpanPengguna" data-uid="${lolos(uid)}">Simpan</button>` +
+    '<button class="batalPengguna">Batal</button></div>'
+  $('formPengguna').classList.remove('sembunyi')
+}
+
+async function simpanPengguna(tombol, ubah) {
+  tombol.disabled = true
+  try {
+    const h = await panggilMaster({ aksi: 'tulis', tabel: 'pengguna', baris: ubah })
+    if (!h.tersimpan) {
+      pesan('Perubahan TIDAK tersimpan: sudah ada perubahan yang lebih baru dari tablet.', true)
+    } else {
+      pesan('Tersimpan. Akan masuk ke tablet saat aplikasi kasir dibuka.')
+    }
+    await muatMaster()
+  } catch (e) {
+    pesan(e.message, true)
+  } finally {
+    tombol.disabled = false
+  }
 }
 
 /**
@@ -768,6 +847,26 @@ $('kartuMaster').addEventListener('click', async (e) => {
   }
   if (t.classList.contains('simpanMaster')) {
     try { await simpanMaster(t) } catch (err) { pesan(err.message, true) }
+  }
+})
+
+$('kartuPengguna').addEventListener('click', async (e) => {
+  const t = e.target
+  if (t.classList.contains('ubahPengguna')) return bukaFormulirPengguna(t.dataset.uid)
+  if (t.classList.contains('batalPengguna')) return $('formPengguna').classList.add('sembunyi')
+  if (t.classList.contains('simpanPengguna')) {
+    const kotak = t.closest('div.baris')
+    const nama = kotak.querySelector('[name=nama]').value
+    // `aktif` DISERTAKAN apa adanya dari data yang sedang tampil. Menghilangkannya membuat server
+    // menerima `aktif: undefined`, validasinya menolak, dan pemilik melihat "aktif wajib boolean" atas
+    // penggantian nama yang tidak menyebut aktif sama sekali.
+    const p = (master.pengguna || []).find((x) => x.uid === t.dataset.uid)
+    return simpanPengguna(t, { uid: t.dataset.uid, nama, aktif: p ? p.aktif : true })
+  }
+  if (t.classList.contains('aktifPengguna')) {
+    const p = (master.pengguna || []).find((x) => x.uid === t.dataset.uid)
+    if (!p) return
+    return simpanPengguna(t, { uid: p.uid, nama: p.nama, aktif: t.dataset.aktif === '1' })
   }
 })
 

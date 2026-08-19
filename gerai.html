@@ -111,6 +111,10 @@
 
     <div class="kartu" id="kartuKas"></div>
 
+    <div class="kartu" id="kartuKonflik"></div>
+
+    <div class="kartu" id="kartuMaster"></div>
+
     <div class="kartu">
       <div class="baris" style="margin-bottom:10px">
         <label>Dari<input id="dari" type="date"></label>
@@ -165,6 +169,26 @@ async function panggil(isi) {
   const { data: { session } } = await sb.auth.getSession()
   if (!session) throw new Error('Sesi habis. Masuk lagi.')
   const r = await fetch(`${URL_SUPABASE}/functions/v1/gerai-data`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ ...isi, tenantId: terpilih }),
+  })
+  const badan = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(badan.error || `HTTP ${r.status}`)
+  return badan
+}
+
+/**
+ * Memanggil `gerai-master` — endpoint TERPISAH dari `gerai-data`, dan pemisahan itu disengaja.
+ *
+ * `gerai-data` hanya BACA, dan KDoc-nya menyatakan itu sebagai penjagaan: satu-satunya penulis
+ * penjualan adalah tablet gerai. Menambahkan jalur tulis ke sana akan membatalkan pernyataan tersebut
+ * untuk seluruh endpoint, termasuk aksi-aksi yang memang tidak boleh punya jalur tulis sama sekali.
+ */
+async function panggilMaster(isi) {
+  const { data: { session } } = await sb.auth.getSession()
+  if (!session) throw new Error('Sesi habis. Masuk lagi.')
+  const r = await fetch(`${URL_SUPABASE}/functions/v1/gerai-master`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
     body: JSON.stringify({ ...isi, tenantId: terpilih }),
@@ -343,6 +367,252 @@ function selisihKas(n) {
   return `<span class="${kelas}">${lolos(tanda + rupiah(Math.abs(n)))}</span>`
 }
 
+/** Data master terakhir yang dimuat, dipakai formulir ubah tanpa memanggil server lagi. */
+let master = { jenis: [], produk: [], channel: [], konflik: [], bekuKarenaBentrok: 0 }
+
+async function muatMaster() {
+  master = await panggilMaster({ aksi: 'baca' })
+  isiKonflik()
+  isiMaster()
+}
+
+/**
+ * Kartu KONFLIK — bagian yang membuat kebekuan sinkronisasi TERLIHAT.
+ *
+ * Sebelum ini, satu nama produk yang kembar antara panel dan tablet membekukan seluruh aliran data
+ * master ke gerai itu, dan kebekuannya tidak terlihat siapa pun: angkanya dihitung di tablet lalu
+ * dibuang oleh pemicunya. Pemilik hanya melihat harga yang tidak pernah berubah, tanpa sebab.
+ *
+ * Ditaruh DI ATAS kartu master, bukan di bawahnya: peringatan yang berada di bawah formulir dibaca
+ * sesudah orangnya menekan Simpan, yaitu sesudah ia menyimpulkan perubahannya berhasil.
+ */
+function isiKonflik() {
+  const aktif = (master.konflik || []).filter((k) => !k.selesai_pada)
+  const beres = (master.konflik || []).filter((k) => k.selesai_pada)
+
+  if (aktif.length === 0 && beres.length === 0) {
+    $('kartuKonflik').classList.add('sembunyi')
+    return
+  }
+  $('kartuKonflik').classList.remove('sembunyi')
+
+  const bentrokAktif = aktif.filter((k) => k.jenis === 'bentrok_nama')
+  const bagian = []
+
+  if (bentrokAktif.length > 0) {
+    // **Kalimatnya menyebut AKIBATNYA, bukan hanya keadaannya.** "Ada 1 konflik" tidak memberi tahu
+    // pemilik bahwa perubahan harganya yang lain pun tidak sampai ke kasir — dan itulah yang
+    // membuatnya menunggu alih-alih memperbaiki.
+    bagian.push(
+      '<h2 style="margin:0 0 8px;font-size:15px">\u26a0 Perubahan belum sampai ke kasir</h2>' +
+      `<p style="margin:0 0 10px">Ada <b>${bentrokAktif.length} nama yang kembar</b> antara panel dan ` +
+      'tablet. Selama ini belum dibereskan, <b>semua</b> perubahan data master berhenti di server dan ' +
+      'tidak masuk ke layar kasir \u2014 termasuk perubahan yang tidak ada hubungannya dengan nama ini. ' +
+      'Ganti salah satu namanya (di panel ini atau di tablet), lalu buka aplikasi di tablet.</p>',
+    )
+  }
+
+  const baris = (k) => {
+    const kapan = k.selesai_pada ? `beres ${waktuWib(k.selesai_pada)}` : `terakhir ${waktuWib(k.terakhir_pada)}`
+    const label = k.jenis === 'bentrok_nama' ? 'nama kembar' : 'perubahan tertimpa'
+    return '<tr' + (k.selesai_pada ? ' class="redup"' : '') + '>' +
+      `<td>${lolos(k.nama || '(tanpa nama)')}</td>` +
+      `<td>${lolos(label)}</td>` +
+      `<td>${lolos(NAMA_TABEL[k.tabel] || k.tabel)}</td>` +
+      `<td>${lolos(kapan)}</td>` +
+      `<td>${lolos(k.jumlah)}\u00d7</td>` +
+      `<td class="redup">${lolos(k.keterangan || '')}</td></tr>`
+  }
+
+  bagian.push(
+    '<div style="overflow-x:auto"><table><thead><tr><th>Nama</th><th>Masalah</th><th>Tabel</th>' +
+    '<th>Kapan</th><th>Kali</th><th>Keterangan</th></tr></thead><tbody>' +
+    [...aktif, ...beres].map(baris).join('') +
+    '</tbody></table></div>',
+  )
+
+  $('kartuKonflik').innerHTML = bagian.join('')
+}
+
+const NAMA_TABEL = {
+  m_jenis_produk: 'Jenis produk',
+  m_produk: 'Produk',
+  m_channel: 'Channel',
+}
+
+/**
+ * Kartu DATA MASTER — harga, nama, urutan, aktif.
+ *
+ * **Tidak ada tombol Hapus, dan itu bukan kelalaian.** Produk yang sudah dipakai transaksi lama tidak
+ * boleh hilang: riwayat penjualan harus tetap terbaca apa adanya, dan foreign key di tablet pun
+ * menolaknya. Jalannya menonaktifkan \u2014 barisnya tetap ada, tidak lagi muncul di kasir.
+ */
+function isiMaster() {
+  const opsiJenis = master.jenis
+    .map((j) => `<option value="${lolos(j.uid)}">${lolos(j.nama)}</option>`).join('')
+
+  const barisProduk = master.produk.map((p) => {
+    const jenisNama = (master.jenis.find((j) => j.uid === p.jenis_uid) || {}).nama || '\u2014'
+    return '<tr>' +
+      `<td>${lolos(p.nama)}</td>` +
+      `<td>${lolos(jenisNama)}</td>` +
+      `<td style="text-align:right">${lolos(rupiah(p.harga))}</td>` +
+      `<td>${p.aktif ? 'aktif' : '<span class="void">nonaktif</span>'}</td>` +
+      // `diubah_oleh` DITAMPILKAN: saat pemilik melihat harga yang bukan yang ia isi, yang pertama
+      // perlu ia ketahui adalah siapa yang terakhir mengubahnya \u2014 tablet atau panel.
+      `<td class="redup">${lolos(p.diubah_oleh)} \u00b7 ${lolos(waktuWib(p.diubah_pada))}</td>` +
+      `<td><button class="ubahProduk" data-uid="${lolos(p.uid)}">Ubah</button></td></tr>`
+  }).join('')
+
+  const barisJenis = master.jenis.map((j) =>
+    '<tr>' +
+    `<td>${lolos(j.nama)}</td>` +
+    `<td style="text-align:right">${lolos(j.urutan)}</td>` +
+    `<td>${j.aktif ? 'aktif' : '<span class="void">nonaktif</span>'}</td>` +
+    `<td class="redup">${lolos(j.diubah_oleh)} \u00b7 ${lolos(waktuWib(j.diubah_pada))}</td>` +
+    `<td><button class="ubahJenis" data-uid="${lolos(j.uid)}">Ubah</button></td></tr>`,
+  ).join('')
+
+  const barisChannel = master.channel.map((c) =>
+    '<tr>' +
+    `<td>${lolos(c.nama)}</td>` +
+    `<td style="text-align:right">${lolos(c.persen_fee)}%</td>` +
+    `<td>${lolos(c.metode_bayar_bawaan)}</td>` +
+    `<td>${c.aktif ? 'aktif' : '<span class="void">nonaktif</span>'}</td>` +
+    `<td class="redup">${lolos(c.diubah_oleh)} \u00b7 ${lolos(waktuWib(c.diubah_pada))}</td>` +
+    `<td><button class="ubahChannel" data-uid="${lolos(c.uid)}">Ubah</button></td></tr>`,
+  ).join('')
+
+  $('kartuMaster').innerHTML =
+    '<h2 style="margin:0 0 4px;font-size:15px">Data master</h2>' +
+    '<p class="redup" style="margin:0 0 12px">Perubahan di sini masuk ke tablet saat aplikasi kasir ' +
+    'dibuka. Data tidak dihapus, hanya dinonaktifkan \u2014 riwayat penjualan lama harus tetap terbaca.</p>' +
+
+    '<h3 style="margin:10px 0 6px;font-size:14px">Produk</h3>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Nama</th><th>Jenis</th>' +
+    '<th style="text-align:right">Harga</th><th>Status</th><th>Terakhir diubah</th><th></th></tr></thead>' +
+    `<tbody>${barisProduk}</tbody></table></div>` +
+    `<div id="formProduk" class="sembunyi" style="margin-top:10px"></div>` +
+    `<button id="tambahProduk" style="margin-top:8px">+ Produk baru</button>` +
+
+    '<h3 style="margin:16px 0 6px;font-size:14px">Jenis produk</h3>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Nama</th>' +
+    '<th style="text-align:right">Urutan</th><th>Status</th><th>Terakhir diubah</th><th></th></tr></thead>' +
+    `<tbody>${barisJenis}</tbody></table></div>` +
+    `<div id="formJenis" class="sembunyi" style="margin-top:10px"></div>` +
+    `<button id="tambahJenis" style="margin-top:8px">+ Jenis baru</button>` +
+
+    '<h3 style="margin:16px 0 6px;font-size:14px">Channel penjualan</h3>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Nama</th>' +
+    '<th style="text-align:right">Fee</th><th>Bayar</th><th>Status</th><th>Terakhir diubah</th>' +
+    '<th></th></tr></thead>' +
+    `<tbody>${barisChannel}</tbody></table></div>` +
+    `<div id="formChannel" class="sembunyi" style="margin-top:10px"></div>`
+
+  $('formProduk').dataset.opsi = opsiJenis
+}
+
+/** Merakit satu formulir ubah/tambah. Nilai lama diloloskan seperti nilai lain \u2014 ia pun dari server. */
+function formulir(tabel, baris) {
+  const b = baris || {}
+  const medan = []
+  const teks = (nama, label, nilai, tipe = 'text') =>
+    `<label>${lolos(label)}<input name="${nama}" type="${tipe}" value="${lolos(nilai ?? '')}"></label>`
+
+  medan.push(teks('nama', 'Nama', b.nama))
+  if (tabel === 'produk') {
+    medan.push(`<label>Jenis<select name="jenisUid">${$('formProduk').dataset.opsi}</select></label>`)
+    medan.push(teks('harga', 'Harga (Rp)', b.harga ?? 0, 'number'))
+  }
+  if (tabel === 'channel') {
+    medan.push(teks('persenFee', 'Fee (%)', b.persen_fee ?? 0, 'number'))
+    medan.push(
+      '<label>Metode bayar<select name="metodeBayarBawaan">' +
+      ['tunai', 'qris', 'transfer', 'aplikasi', 'tidak_dicatat']
+        .map((m) => `<option value="${m}"${b.metode_bayar_bawaan === m ? ' selected' : ''}>${m}</option>`)
+        .join('') +
+      '</select></label>',
+    )
+  }
+  medan.push(teks('urutan', 'Urutan', b.urutan ?? 0, 'number'))
+  medan.push(
+    '<label>Status<select name="aktif">' +
+    `<option value="1"${b.aktif === false ? '' : ' selected'}>aktif</option>` +
+    `<option value="0"${b.aktif === false ? ' selected' : ''}>nonaktif</option>` +
+    '</select></label>',
+  )
+
+  return '<div class="baris" style="flex-wrap:wrap;gap:8px">' + medan.join('') +
+    `<button class="simpanMaster" data-tabel="${lolos(tabel)}" data-uid="${lolos(b.uid || '')}">Simpan</button>` +
+    '<button class="batalMaster">Batal</button></div>'
+}
+
+function bukaFormulir(tabel, uid) {
+  const kotak = $('form' + tabel[0].toUpperCase() + tabel.slice(1))
+  const daftar = tabel === 'produk' ? master.produk : tabel === 'jenis' ? master.jenis : master.channel
+  const baris = uid ? daftar.find((x) => x.uid === uid) : null
+  kotak.innerHTML = formulir(tabel, baris)
+  kotak.classList.remove('sembunyi')
+  if (tabel === 'produk' && baris) {
+    const sel = kotak.querySelector('select[name=jenisUid]')
+    if (sel) sel.value = baris.jenis_uid || ''
+  }
+}
+
+async function simpanMaster(tombol) {
+  const kotak = tombol.closest('div.baris')
+  const nilai = (n) => {
+    const el = kotak.querySelector(`[name=${n}]`)
+    return el ? el.value : undefined
+  }
+  const tabel = tombol.dataset.tabel
+  const uid = tombol.dataset.uid
+
+  const baris = {
+    nama: nilai('nama'),
+    urutan: Number(nilai('urutan')),
+    aktif: nilai('aktif') === '1',
+  }
+  // `uid` HANYA disertakan bila mengubah. Kosong berarti tambah baru, dan uid-nya dibangkitkan SERVER
+  // \u2014 halaman ini tidak pernah menentukan identitas baris.
+  if (uid) baris.uid = uid
+  if (tabel === 'produk') {
+    baris.jenisUid = nilai('jenisUid')
+    baris.harga = Number(nilai('harga'))
+    // `dirakit` tidak diedit dari panel: ia menentukan apakah penjualan mengurangi stok bahan, dan
+    // mengubahnya dari jauh tanpa melihat resepnya membuat stok bahan bergeser tanpa sebab yang
+    // terbaca di gerai. Nilai lamanya dipertahankan; produk baru mengikuti bawaan tablet.
+    const lama = master.produk.find((p) => p.uid === uid)
+    baris.dirakit = lama ? lama.dirakit : true
+  }
+  if (tabel === 'channel') {
+    baris.persenFee = Number(nilai('persenFee'))
+    baris.metodeBayarBawaan = nilai('metodeBayarBawaan')
+    const lama = master.channel.find((c) => c.uid === uid)
+    baris.bawaan = lama ? lama.bawaan : false
+  }
+
+  tombol.disabled = true
+  try {
+    const h = await panggilMaster({ aksi: 'tulis', tabel, baris })
+    // **`tersimpan: false` DILAPORKAN, tidak didiamkan.** Ia praktis mustahil (stempel waktunya dari
+    // jam server), tetapi yang "praktis mustahil" lalu terjadi tanpa dilaporkan adalah harga yang
+    // tidak berubah tanpa sebab \u2014 dan pemilik akan mencoba berulang kali atas sesuatu yang bukan
+    // salahnya.
+    if (!h.tersimpan) {
+      pesan('Perubahan TIDAK tersimpan: sudah ada perubahan yang lebih baru dari tablet.', true)
+    } else {
+      pesan(h.baru ? 'Ditambahkan. Akan masuk ke tablet saat aplikasi kasir dibuka.'
+        : 'Tersimpan. Akan masuk ke tablet saat aplikasi kasir dibuka.')
+    }
+    await muatMaster()
+  } catch (e) {
+    pesan(e.message, true)
+  } finally {
+    tombol.disabled = false
+  }
+}
+
 async function muatTransaksi() {
   $('daftarTrx').innerHTML = '<p class="redup">Memuat…</p>'
   const d = await panggil({
@@ -405,6 +675,10 @@ async function muatSemua() {
   try {
     await muatRingkas()
     await muatKas()
+    // **Master dimuat SEBELUM transaksi.** Kartu konflik yang muncul belakangan berarti pemilik sudah
+    // menggulir ke daftar transaksi ketika peringatan "perubahan belum sampai ke kasir" akhirnya
+    // tergambar di atas layar — di luar pandangannya.
+    await muatMaster()
     await muatTransaksi()
   } catch (e) {
     pesan(e.message, true)
@@ -478,6 +752,23 @@ $('daftarTrx').addEventListener('click', async (e) => {
   const tr = e.target.closest('tr.trx')
   if (!tr) return
   try { await bukaItem(tr) } catch (err) { pesan(err.message, true) }
+})
+
+// Delegasi juga untuk kartu master: tabel dan formulirnya digambar ulang setiap kali data dimuat,
+// jadi pemasang per tombol akan menumpuk pendengar pada elemen yang sudah dibuang.
+$('kartuMaster').addEventListener('click', async (e) => {
+  const t = e.target
+  if (t.classList.contains('ubahProduk')) return bukaFormulir('produk', t.dataset.uid)
+  if (t.classList.contains('ubahJenis')) return bukaFormulir('jenis', t.dataset.uid)
+  if (t.classList.contains('ubahChannel')) return bukaFormulir('channel', t.dataset.uid)
+  if (t.id === 'tambahProduk') return bukaFormulir('produk', null)
+  if (t.id === 'tambahJenis') return bukaFormulir('jenis', null)
+  if (t.classList.contains('batalMaster')) {
+    return t.closest('div[id^=form]').classList.add('sembunyi')
+  }
+  if (t.classList.contains('simpanMaster')) {
+    try { await simpanMaster(t) } catch (err) { pesan(err.message, true) }
+  }
 })
 
 // Sesi yang masih hidup langsung dipakai — pemilik tidak perlu mengetik sandi tiap kali membuka

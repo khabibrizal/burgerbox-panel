@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>BurgerBox — Laporan Gerai</title>
+<!--
+  Halaman PEMILIK GERAI. Terpisah dari `index.template.html` yang untuk Super Admin, dan
+  terpisahnya disengaja: yang boleh dilihat keduanya sama sekali berbeda, dan satu halaman
+  bercabang-peran adalah satu tempat di mana cabang yang salah membocorkan data seluruh gerai
+  kepada satu pemiliknya.
+
+  Nilai https://fpyamxztplpbiszttfoi.supabase.co dan eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZweWFteHp0cGxwYmlzenR0Zm9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NjU3MzcsImV4cCI6MjEwMjI0MTczN30.CiRinf7qLQx6Xtx0OSqLKb9mP8pVhFs16enCzyy4sG0 disuntik `scripts/unggah-panel.mjs` dari
+  `.env.local`. Anon key memang aman tayang: RLS menyala tanpa policy, jadi ia tidak dapat membaca
+  satu baris pun. Seluruh data lewat `gerai-data`, yang memeriksa kepemilikan.
+
+  Dirancang untuk PONSEL lebih dulu. Pemilik membacanya sambil di jalan, bukan di meja — itu
+  seluruh gunanya halaman ini ada.
+-->
+<style>
+  :root {
+    --bg: #faf8f5; --kartu: #fff; --tepi: #e6e0d8; --teks: #2b2622; --redup: #7a6f66;
+    --aksen: #b4541e; --hijau: #2f7d4f; --merah: #b3261e; --biru: #1e4f8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1815; --kartu: #241f1b; --tepi: #3a332c; --teks: #f0ebe4; --redup: #a89c91;
+      --aksen: #e8843f; --hijau: #6fce93; --merah: #ff8a80; --biru: #7fb3f0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--teks);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    background: var(--kartu); border-bottom: 1px solid var(--tepi);
+    padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  main { padding: 16px; max-width: 900px; margin: 0 auto; }
+  .kartu {
+    background: var(--kartu); border: 1px solid var(--tepi); border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .angka { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .angka div { background: var(--kartu); border: 1px solid var(--tepi); border-radius: 10px; padding: 12px; }
+  .angka .label { font-size: 12px; color: var(--redup); }
+  .angka .nilai { font-size: 20px; font-weight: 650; margin-top: 2px; }
+  .angka .ket { font-size: 12px; color: var(--redup); margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--tepi); }
+  th { font-size: 12px; color: var(--redup); font-weight: 600; }
+  td.kanan, th.kanan { text-align: right; }
+  tr.trx { cursor: pointer; }
+  tr.trx:hover td { background: rgba(180, 84, 30, .06); }
+  .void { color: var(--merah); font-weight: 600; }
+  .redup { color: var(--redup); }
+  button {
+    font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--tepi);
+    background: var(--kartu); color: var(--teks); cursor: pointer;
+  }
+  button.utama { background: var(--aksen); border-color: var(--aksen); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  input, select {
+    font: inherit; padding: 9px 10px; border-radius: 8px;
+    border: 1px solid var(--tepi); background: var(--bg); color: var(--teks); width: 100%;
+  }
+  .pesan { padding: 10px 12px; border-radius: 8px; background: rgba(30,79,138,.12); margin-bottom: 12px; }
+  .pesan.galat { background: rgba(179,38,30,.14); color: var(--merah); }
+  .sembunyi { display: none !important; }
+  .baris { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  .baris > label { flex: 1; min-width: 130px; font-size: 12px; color: var(--redup); }
+  #masuk { max-width: 340px; margin: 48px auto; }
+  #masuk label { display: block; margin-bottom: 10px; font-size: 13px; color: var(--redup); }
+  .rincian td { border: 0; padding: 3px 6px; font-size: 13px; }
+  caption { text-align: left; font-weight: 600; padding: 6px; }
+</style>
+</head>
+<body>
+
+<header class="sembunyi" id="kepala">
+  <h1 id="namaGerai">Laporan Gerai</h1>
+  <select id="pilihGerai" class="sembunyi" style="width:auto"></select>
+  <span class="redup" id="emailku"></span>
+  <button id="keluar">Keluar</button>
+</header>
+
+<main>
+  <div id="pesan"></div>
+
+  <section id="masuk" class="kartu">
+    <h2 style="margin-top:0;font-size:16px">Masuk — Pemilik Gerai</h2>
+    <label>Email
+      <input id="email" type="email" autocomplete="username" inputmode="email">
+    </label>
+    <label>Sandi
+      <input id="sandi" type="password" autocomplete="current-password">
+    </label>
+    <button class="utama" id="tombolMasuk" style="width:100%">Masuk</button>
+    <p class="redup" style="font-size:12px">
+      Akun dibuat oleh admin BurgerBox. Halaman ini hanya menampilkan penjualan gerai Anda.
+    </p>
+  </section>
+
+  <div id="isi" class="sembunyi">
+    <div class="angka" id="ringkas"></div>
+    <div class="kartu" id="kartuTagihan"></div>
+
+    <div class="kartu">
+      <div class="baris" style="margin-bottom:10px">
+        <label>Dari<input id="dari" type="date"></label>
+        <label>Sampai<input id="sampai" type="date"></label>
+        <button id="tombolFilter">Tampilkan</button>
+      </div>
+      <div id="daftarTrx"><p class="redup">Memuat…</p></div>
+      <div class="baris" style="margin-top:10px;justify-content:space-between">
+        <button id="sebelumnya">← Sebelumnya</button>
+        <span class="redup" id="posisi"></span>
+        <button id="berikutnya">Berikutnya →</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const URL_SUPABASE = 'https://fpyamxztplpbiszttfoi.supabase.co'
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZweWFteHp0cGxwYmlzenR0Zm9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2NjU3MzcsImV4cCI6MjEwMjI0MTczN30.CiRinf7qLQx6Xtx0OSqLKb9mP8pVhFs16enCzyy4sG0'
+const sb = createClient(URL_SUPABASE, ANON)
+
+const $ = (id) => document.getElementById(id)
+const rupiah = (n) => 'Rp ' + Number(n).toLocaleString('id-ID')
+
+/**
+ * Meloloskan teks agar aman disisipkan ke HTML. **WAJIB untuk setiap nilai yang datang dari
+ * server**, tanpa kecuali.
+ *
+ * Di halaman ini nilainya termasuk nama kasir, nama channel, dan nama produk — ketiganya diketik
+ * di tablet gerai, dan tidak satu pun disaring bentuknya di sana. Nama produk berisi
+ * `<img src=x onerror=…>` akan menjalankan skrip di halaman ini, dengan sesi pemiliknya.
+ *
+ * Diloloskan juga nilai yang "pasti aman" seperti nominal dan tanggal: aturan yang punya
+ * pengecualian akan dipakai salah oleh orang berikutnya yang menambah baris di sini, dan ia tidak
+ * akan tahu nilai mana yang termasuk pengecualian.
+ */
+const lolos = (v) => String(v ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;')
+
+function pesan(teks, galat = false) {
+  $('pesan').innerHTML = teks ? `<div class="pesan ${galat ? 'galat' : ''}">${lolos(teks)}</div>` : ''
+}
+
+/** Memanggil `gerai-data` dengan JWT sesi. Seluruh data hanya lewat sini. */
+async function panggil(isi) {
+  const { data: { session } } = await sb.auth.getSession()
+  if (!session) throw new Error('Sesi habis. Masuk lagi.')
+  const r = await fetch(`${URL_SUPABASE}/functions/v1/gerai-data`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ ...isi, tenantId: terpilih }),
+  })
+  const badan = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(badan.error || `HTTP ${r.status}`)
+  return badan
+}
+
+/** Gerai yang sedang dilihat. `null` berarti "yang pertama", ditentukan server. */
+let terpilih = null
+let halaman = 0
+
+/** `YYYY-MM-DD HH.MM` menurut WIB — jam yang sama dengan yang tertera di nota tablet. */
+function waktuWib(iso) {
+  const d = new Date(iso)
+  const w = new Date(d.getTime() + 7 * 3600000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${w.getUTCFullYear()}-${p(w.getUTCMonth() + 1)}-${p(w.getUTCDate())} ` +
+    `${p(w.getUTCHours())}.${p(w.getUTCMinutes())}`
+}
+
+function kartuAngka(label, nilai, ket) {
+  return `<div><div class="label">${lolos(label)}</div>` +
+    `<div class="nilai">${lolos(nilai)}</div>` +
+    (ket ? `<div class="ket">${lolos(ket)}</div>` : '') + '</div>'
+}
+
+async function muatRingkas() {
+  const d = await panggil({ aksi: 'ringkas' })
+  terpilih = d.terpilih
+  $('namaGerai').textContent = d.nama
+  $('emailku').textContent = d.email
+
+  // Pemilih gerai hanya muncul bila memang punya lebih dari satu. Dropdown berisi satu pilihan
+  // adalah kontrol yang menuntut perhatian tanpa menawarkan keputusan.
+  const pilih = $('pilihGerai')
+  if (d.gerai.length > 1) {
+    pilih.innerHTML = d.gerai
+      .map((g) => `<option value="${lolos(g.id)}"${g.id === d.terpilih ? ' selected' : ''}>${lolos(g.nama)}</option>`)
+      .join('')
+    pilih.classList.remove('sembunyi')
+  }
+
+  $('ringkas').innerHTML = [
+    kartuAngka('Omzet hari ini', rupiah(d.hariIni.omzet), `${d.hariIni.trx} transaksi · ${d.hariIni.tanggal}`),
+    kartuAngka('7 hari terakhir', rupiah(d.tujuhHari.omzet)),
+    kartuAngka(
+      'Siklus berjalan',
+      rupiah(d.siklusIni.omzet),
+      `${d.siklusIni.trx} transaksi` + (d.siklusIni.dibatalkan ? ` · ${d.siklusIni.dibatalkan} dibatalkan` : ''),
+    ),
+    kartuAngka('Status gerai', d.status === 'active' ? 'Aktif' : 'Terkunci', `Siklus s/d ${d.siklus.akhir}`),
+  ].join('')
+
+  $('kartuTagihan').innerHTML = isiTagihan(d)
+}
+
+function isiTagihan(d) {
+  if (d.tagihan.length > 0) {
+    return d.tagihan.map((t) => {
+      const baris = [
+        ['Omzet bersih ' + t.periodeAwal + ' s/d ' + t.periodeAkhir, rupiah(t.omzetTotal)],
+        [`Tarif langganan ${t.persen}%`, rupiah(t.fee)],
+      ]
+      // Baris koreksi hanya bila ada — dan menyebut arahnya, sebab bagi pemilik "dikembalikan"
+      // dan "baru tertagih" adalah dua kejadian yang sangat berbeda.
+      if (t.koreksi !== 0) {
+        baris.push([
+          t.koreksi < 0 ? 'Koreksi: penjualan periode lalu yang dibatalkan'
+            : 'Koreksi: penjualan periode lalu yang baru tersinkron',
+          (t.koreksi < 0 ? '−' : '+') + rupiah(Math.abs(t.koreksi)),
+        ])
+      }
+      baris.push(['<b>Tagihan</b>', '<b>' + rupiah(t.total) + '</b>'])
+      return `<h2 style="margin:0 0 8px;font-size:15px">Tagihan belum lunas — jatuh tempo ${lolos(t.jatuhTempo)}</h2>` +
+        '<table class="rincian">' +
+        baris.map(([k, v]) => `<tr><td>${k.startsWith('<b>') ? k : lolos(k)}</td>` +
+          `<td class="kanan">${v.startsWith('<b>') ? v : lolos(v)}</td></tr>`).join('') +
+        '</table>' +
+        '<p class="redup" style="font-size:12px;margin-bottom:0">Pembayaran dan unggah bukti dilakukan dari tablet gerai.</p>'
+    }).join('<hr>')
+  }
+
+  if (!d.perkiraan) return '<p class="redup" style="margin:0">Belum ada tagihan.</p>'
+
+  // Disebut PERKIRAAN, bukan "tagihan". Omzet siklus ini masih dapat berubah sampai siklusnya
+  // tutup; menyebutnya tagihan membuat pemilik menyiapkan nominal yang belum tentu benar.
+  return '<h2 style="margin:0 0 8px;font-size:15px">Perkiraan tagihan siklus ini</h2>' +
+    '<table class="rincian">' +
+    `<tr><td>Omzet bersih siklus berjalan</td><td class="kanan">${lolos(rupiah(d.perkiraan.omzet))}</td></tr>` +
+    `<tr><td>Tarif langganan ${lolos(d.perkiraan.persen)}%</td>` +
+    `<td class="kanan">${lolos(rupiah(d.perkiraan.nominal))}</td></tr>` +
+    '</table>' +
+    '<p class="redup" style="font-size:12px;margin-bottom:0">' +
+    'Angka ini masih berjalan — tagihan resminya terbit saat siklus tutup.</p>'
+}
+
+async function muatTransaksi() {
+  $('daftarTrx').innerHTML = '<p class="redup">Memuat…</p>'
+  const d = await panggil({
+    aksi: 'transaksi',
+    halaman,
+    dari: $('dari').value || undefined,
+    sampai: $('sampai').value || undefined,
+  })
+
+  if (d.transaksi.length === 0) {
+    $('daftarTrx').innerHTML = '<p class="redup">Tidak ada transaksi pada rentang ini.</p>'
+    $('posisi').textContent = ''
+  } else {
+    $('daftarTrx').innerHTML =
+      '<table><thead><tr><th>Waktu</th><th>Nomor</th><th>Kasir</th><th>Channel</th>' +
+      '<th class="kanan">Bersih</th></tr></thead><tbody>' +
+      d.transaksi.map((t) => `
+        <tr class="trx" data-uid="${lolos(t.uid)}">
+          <td>${lolos(waktuWib(t.terjadiPada))}</td>
+          <td>${lolos(t.nomor)}${t.status !== 'completed' ? ' <span class="void">DIBATALKAN</span>' : ''}</td>
+          <td>${lolos(t.kasir)}</td>
+          <td>${lolos(t.channel)}</td>
+          <td class="kanan">${lolos(rupiah(t.bersih))}</td>
+        </tr>`).join('') +
+      '</tbody></table>'
+
+    const awal = d.halaman * d.sehalaman + 1
+    const akhir = Math.min(d.jumlah, awal + d.transaksi.length - 1)
+    $('posisi').textContent = `${awal}–${akhir} dari ${d.jumlah}`
+  }
+
+  $('sebelumnya').disabled = halaman === 0
+  $('berikutnya').disabled = (halaman + 1) * d.sehalaman >= d.jumlah
+}
+
+/** Membuka rincian item satu transaksi, di bawah barisnya. */
+async function bukaItem(tr) {
+  const uid = tr.dataset.uid
+  const adaSetelahnya = tr.nextElementSibling
+  if (adaSetelahnya && adaSetelahnya.classList.contains('isi-item')) {
+    adaSetelahnya.remove()
+    return
+  }
+  const d = await panggil({ aksi: 'item', uid })
+  const baris = document.createElement('tr')
+  baris.className = 'isi-item'
+  baris.innerHTML = `<td colspan="5">` +
+    (d.item.length === 0
+      ? '<span class="redup">Item tidak tercatat.</span>'
+      : '<table class="rincian">' + d.item.map((i) => `
+          <tr><td>${lolos(i.produk)}</td>
+          <td class="kanan">${lolos(i.qty)} × ${lolos(rupiah(i.hargaSatuan))}</td>
+          <td class="kanan">${lolos(rupiah(i.subtotal))}</td></tr>`).join('') + '</table>') +
+    '</td>'
+  tr.after(baris)
+}
+
+async function muatSemua() {
+  pesan('')
+  try {
+    await muatRingkas()
+    await muatTransaksi()
+  } catch (e) {
+    pesan(e.message, true)
+  }
+}
+
+function tampilkanMasuk(masuk) {
+  $('masuk').classList.toggle('sembunyi', masuk)
+  $('isi').classList.toggle('sembunyi', !masuk)
+  $('kepala').classList.toggle('sembunyi', !masuk)
+}
+
+$('tombolMasuk').addEventListener('click', async () => {
+  const tombol = $('tombolMasuk')
+  tombol.disabled = true
+  pesan('')
+  try {
+    const { error } = await sb.auth.signInWithPassword({
+      email: $('email').value.trim(),
+      password: $('sandi').value,
+    })
+    if (error) throw new Error('Email atau sandi salah.')
+    $('sandi').value = ''
+    tampilkanMasuk(true)
+    await muatSemua()
+  } catch (e) {
+    pesan(e.message, true)
+  } finally {
+    tombol.disabled = false
+  }
+})
+
+$('sandi').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('tombolMasuk').click() })
+
+$('keluar').addEventListener('click', async () => {
+  await sb.auth.signOut()
+  terpilih = null
+  tampilkanMasuk(false)
+})
+
+$('pilihGerai').addEventListener('change', async (e) => {
+  terpilih = e.target.value
+  halaman = 0
+  await muatSemua()
+})
+
+$('tombolFilter').addEventListener('click', async () => {
+  halaman = 0
+  try { await muatTransaksi() } catch (e) { pesan(e.message, true) }
+})
+
+$('sebelumnya').addEventListener('click', async () => {
+  if (halaman > 0) { halaman--; try { await muatTransaksi() } catch (e) { pesan(e.message, true) } }
+})
+$('berikutnya').addEventListener('click', async () => {
+  halaman++
+  try { await muatTransaksi() } catch (e) { pesan(e.message, true) }
+})
+
+// Delegasi, bukan pemasang per baris: barisnya digambar ulang setiap kali halaman berganti, dan
+// pemasang per baris akan menumpuk pendengar pada elemen yang sudah dibuang.
+$('daftarTrx').addEventListener('click', async (e) => {
+  const tr = e.target.closest('tr.trx')
+  if (!tr) return
+  try { await bukaItem(tr) } catch (err) { pesan(err.message, true) }
+})
+
+// Sesi yang masih hidup langsung dipakai — pemilik tidak perlu mengetik sandi tiap kali membuka
+// halaman ini dari ponselnya.
+const { data: { session } } = await sb.auth.getSession()
+if (session) {
+  tampilkanMasuk(true)
+  await muatSemua()
+} else {
+  tampilkanMasuk(false)
+}
+</script>
+</body>
+</html>

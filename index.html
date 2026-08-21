@@ -165,7 +165,7 @@
         keputusan itu dibuat. Tab terpisah membuat pembatalan menjadi sesuatu yang harus dicari.
       -->
       <h2 style="margin-top:28px">Riwayat keputusan</h2>
-      <table><thead><tr><th>Waktu</th><th>Keputusan</th><th>Oleh</th><th></th></tr></thead>
+      <table id="tabel-keputusan"><thead><tr><th>Gerai</th><th>Waktu</th><th>Keputusan</th><th>Oleh</th><th></th></tr></thead>
       <tbody id="daftar-keputusan"></tbody></table>
     </section>
 
@@ -277,11 +277,28 @@ function kartuPendaftaran(p) {
     </div>`
 }
 
-function barisKeputusan(k) {
+/**
+ * Satu baris riwayat keputusan.
+ *
+ * **Nama gerainya kolom PERTAMA, dan itu bukan urusan tata letak.** Baris ini memuat tombol
+ * Batalkan, yang mengembalikan gerai ke keadaan sebelum keputusan — TERMASUK terkunci lagi.
+ * Sebelum ini barisnya berbunyi "Waktu | Keputusan | Oleh": admin diminta mengunci sebuah gerai
+ * dari baris yang tidak menyebut gerai mana. Yang dibaca lebih dulu harus subjeknya.
+ *
+ * Namanya diambil dari `tenants` yang SUDAH ada di respons yang sama, bukan dari embed PostgREST
+ * (`tenants(nama)`): `keputusan_pembayaran` punya TIGA foreign key dan `invoices` juga menunjuk
+ * `tenants`, jadi embed yang ditafsirkan ambigu menjawab PGRST201 — dan yang mati bukan satu kolom
+ * melainkan SELURUH endpoint admin, sehingga panelnya kosong total.
+ *
+ * Gerai yang tidak ada di peta disebut APA ADANYA, bukan dikosongkan: sel kosong terbaca seperti
+ * gerai tanpa nama, sedangkan ini keadaan yang seharusnya tidak mungkin dan perlu terlihat.
+ */
+function barisKeputusan(k, namaGerai) {
   const batal = k.dibatalkan_pada
     ? `<span class="redup">dibatalkan oleh ${lolos(k.dibatalkan_oleh)}</span>`
     : `<button class="bahaya batal" data-id="${lolos(k.id)}">Batalkan</button>`
   return `<tr>
+    <td><strong>${lolos(namaGerai.get(k.tenant_id) ?? '(gerai tidak dikenal)')}</strong></td>
     <td>${new Date(k.diputuskan_pada).toLocaleString('id-ID')}</td>
     <td>${lolos(k.keputusan)}</td>
     <td class="redup">${lolos(k.diputuskan_oleh)}</td>
@@ -414,9 +431,16 @@ async function muat() {
     `<tr><td>${lolos(t.nama)}<br><span class="redup">${lolos(t.owner_name)}</span></td>
      <td>${lolos(t.status)}</td>
      <td class="redup">${lolos(t.cycle_start)} → ${lolos(t.cycle_end)}</td></tr>`).join('')
+  // Peta id->nama gerai untuk riwayat keputusan. `d.tenants` tidak disaring dan riwayatnya dibatasi
+  // 50 baris, jadi setiap tenant yang dirujuk pasti ada di dalamnya.
+  const namaGerai = new Map(d.tenants.map((t) => [t.id, t.nama]))
+  // colspan DITURUNKAN dari jumlah <th>, tidak diangkakan. Dua tempat yang harus sepakat tentang
+  // jumlah kolom adalah dua tempat yang akan menyimpang — dan yang menyimpang hanya terlihat saat
+  // riwayatnya KOSONG, keadaan yang paling jarang dibuka.
+  const kolom = document.querySelectorAll('#tabel-keputusan thead th').length
   $('daftar-keputusan').innerHTML = d.keputusan.length
-    ? d.keputusan.map(barisKeputusan).join('')
-    : '<tr><td colspan="4" class="redup">Belum ada keputusan.</td></tr>'
+    ? d.keputusan.map((k) => barisKeputusan(k, namaGerai)).join('')
+    : `<tr><td colspan="${kolom}" class="redup">Belum ada keputusan.</td></tr>`
   await muatKode()
   await muatTarif()
   pesan('')

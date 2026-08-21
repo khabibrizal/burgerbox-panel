@@ -123,6 +123,12 @@
         <label>Sampai<input id="sampai" type="date"></label>
         <button id="tombolFilter">Tampilkan</button>
       </div>
+      <!--
+        Di DALAM kartu yang memuat #dari/#sampai, bukan kartu sendiri: rentangnya yang SAMA, dan
+        pasangan tanggal kedua di halaman ini akan membuat dua angka dapat berasal dari periode
+        berbeda tanpa terlihat.
+      -->
+      <div id="kartuProduk" style="margin-bottom:14px"></div>
       <div id="daftarTrx"><p class="redup">Memuat…</p></div>
       <div class="baris" style="margin-top:10px;justify-content:space-between">
         <button id="sebelumnya">← Sebelumnya</button>
@@ -692,6 +698,126 @@ async function simpanMaster(tombol) {
   }
 }
 
+/**
+ * LAPORAN PENJUALAN PER PRODUK — qty & omzet KOTOR per produk, plus rekonsiliasi ke omzet bersih.
+ *
+ * Agregatnya dimuat SEKALI per klik Tampilkan; dropdown produk hanya menyaring yang sudah ada di
+ * memori. Memanggil server tiap kali produk diganti berarti menunggu jaringan untuk data yang
+ * sudah dipegang — dan pemilik yang membandingkan lima produk akan menunggu lima kali.
+ *
+ * Namanya `barisJualProduk`, BUKAN `barisProduk`: `barisProduk` sudah dipakai kartu Data master di
+ * berkas ini (di dalam `isiMaster`), dan memakai nama itu membuat yang rusak adalah bagian yang
+ * tidak sedang dikerjakan — gejalanya muncul di tempat lain.
+ */
+let laporanProduk = null
+let produkTerpilih = ''
+
+/**
+ * Opsi dropdown = nama dari daftar MASTER digabung dengan nama yang muncul di HASIL.
+ *
+ * Gabungan itu perlu dua-duanya: nama master saja kehilangan riwayat produk yang pernah diganti
+ * nama (`transaksi_item.produk` adalah potret saat penjualan), dan nama hasil saja menyembunyikan
+ * produk yang NOL terjual — padahal "produk ini tidak laku" adalah jawaban, bukan kekosongan.
+ *
+ * `produkTerpilih` ikut dimasukkan walau tidak ada di keduanya. Tanpa itu, produk yang menghilang
+ * dari master DAN dari hasil membuat dropdown-nya kembali ke "Semua produk" sementara tabelnya
+ * masih menyaring produk lama — dua pernyataan yang bertentangan di satu kartu.
+ *
+ * `master` dibaca defensif: ia datang dari `gerai-master` lewat permintaan TERPISAH, jadi kartu ini
+ * dapat tergambar sebelum daftarnya sampai. Kartu yang melempar akan mematikan sisa render.
+ */
+function opsiProduk(lap) {
+  const dariMaster = master && Array.isArray(master.produk) ? master.produk.map((p) => p.nama) : []
+  const nama = [...new Set([
+    ...dariMaster,
+    ...lap.produk.map((p) => p.produk),
+    ...(produkTerpilih ? [produkTerpilih] : []),
+  ])].filter((n) => n).sort((a, b) => String(a).localeCompare(String(b), 'id'))
+
+  return ['<option value="">Semua produk</option>'].concat(
+    nama.map((n) =>
+      `<option value="${lolos(n)}"${n === produkTerpilih ? ' selected' : ''}>${lolos(n)}</option>`),
+  ).join('')
+}
+
+function barisJualProduk(lap) {
+  const r = lap.ringkas
+
+  // Diskon EFEKTIF DITURUNKAN, bukan diambil dari `diskonTercatat`. Diskon yang melebihi nilai
+  // transaksinya menjepit `total` ke 0 di aplikasi (`Cart.total` memakai `coerceAtLeast(0)`), jadi
+  // `diskonTercatat` TIDAK menyeimbangkan barisnya — dan baris yang tidak seimbang membuat seluruh
+  // angka di kartu ini dicurigai, termasuk yang benar.
+  const diskonEfektif = r.itemKotor - r.total
+
+  // Produk terpilih yang nol terjual tetap ditampilkan sebagai 0 pcs / Rp 0. Barisnya yang hilang
+  // tidak dapat dibedakan dari kartu yang gagal memuat.
+  const baris = produkTerpilih
+    ? [lap.produk.find((p) => p.produk === produkTerpilih) ||
+       { produk: produkTerpilih, qty: 0, kotor: 0 }]
+    : lap.produk
+
+  const sel = (t) => `<td class="kanan">${t}</td>`
+
+  // Pemeriksaan keutuhan, dan ini FITUR bukan hiasan: `trxSubtotal` dihitung tablet saat transaksi
+  // dibuat, `itemKotor` adalah baris yang benar-benar SAMPAI ke server. Bedanya hanya dapat berarti
+  // ada item yang belum tersinkron. Tanpa peringatan ini, laporan yang kekurangan item terlihat
+  // sama wajarnya dengan yang lengkap dan pemilik menyimpulkan produknya kurang laku.
+  const peringatan = r.itemKotor === r.trxSubtotal ? '' :
+    '<p style="margin:0 0 10px"><span class="void">\u26a0 Ada item penjualan yang belum sampai ke ' +
+    `server</span> (selisih ${lolos(rupiah(r.trxSubtotal - r.itemKotor))}). Angka per produk di ` +
+    'bawah lebih KECIL daripada kenyataan. Buka aplikasi di tablet supaya sisanya terkirim.</p>'
+
+  const isi = baris.length === 0
+    ? '<p class="redup">Tidak ada penjualan pada rentang ini.</p>'
+    : '<table><tbody>' + baris.map((p) =>
+        `<tr><td>${lolos(p.produk)}</td>${sel(lolos(p.qty) + ' pcs')}` +
+        `${sel(lolos(rupiah(p.kotor)))}</tr>`).join('') +
+      '</tbody></table>'
+
+  return (
+    '<h2 style="margin:0 0 2px;font-size:15px">Penjualan per produk</h2>' +
+    '<p class="redup" style="margin:0 0 8px;font-size:12px">sebelum diskon &amp; komisi platform</p>' +
+    '<div class="baris" style="margin-bottom:8px"><label>produk' +
+    `<select id="pilihProduk">${opsiProduk(lap)}</select></label></div>` +
+    peringatan +
+    isi +
+    '<table style="margin-top:8px"><tbody>' +
+    `<tr><td>Total harga jual</td>${sel(lolos(rupiah(r.itemKotor)))}</tr>` +
+    `<tr class="redup"><td>diskon</td>${sel('-' + lolos(rupiah(diskonEfektif)))}</tr>` +
+    `<tr class="redup"><td>komisi platform</td>${sel('-' + lolos(rupiah(r.komisi)))}</tr>` +
+    `<tr><td><b>Omzet bersih</b></td>${sel('<b>' + lolos(rupiah(r.bersih)) + '</b>')}</tr>` +
+    '</tbody></table>' +
+    // Diskon TERCATAT tetap disebut bila berbeda dari yang efektif. Menampilkan angka lain daripada
+    // yang pemilik masukkan tanpa menyebut apa pun adalah kegagalan senyap.
+    (r.diskonTercatat === diskonEfektif ? '' :
+      `<p class="redup" style="font-size:12px">Diskon tercatat ${lolos(rupiah(r.diskonTercatat))}, ` +
+      `terpakai ${lolos(rupiah(diskonEfektif))} \u2014 sisanya melebihi nilai transaksinya.</p>`) +
+    `<p class="redup" style="font-size:12px">${lolos(r.transaksi)} transaksi` +
+    (r.dibatalkan ? ` \u00b7 ${lolos(r.dibatalkan)} dibatalkan` : '') + '</p>' +
+    (produkTerpilih
+      ? '<p class="redup" style="font-size:12px">Rekonsiliasi di atas untuk SELURUH rentang, bukan ' +
+        'untuk produk yang dipilih \u2014 omzet bersih tidak dapat dipecah per produk.</p>'
+      : '')
+  )
+}
+
+async function muatProduk() {
+  $('kartuProduk').innerHTML = '<p class="redup">Memuat…</p>'
+  // Rentangnya DIBACA dari #dari/#sampai yang sama dengan daftar transaksi. Pasangan tanggal kedua
+  // di halaman ini akan membuat dua angka berasal dari periode berbeda tanpa terlihat.
+  laporanProduk = await panggil({
+    aksi: 'produk',
+    dari: $('dari').value || undefined,
+    sampai: $('sampai').value || undefined,
+  })
+  gambarProduk()
+}
+
+function gambarProduk() {
+  if (!laporanProduk) return
+  $('kartuProduk').innerHTML = barisJualProduk(laporanProduk)
+}
+
 async function muatTransaksi() {
   $('daftarTrx').innerHTML = '<p class="redup">Memuat…</p>'
   const d = await panggil({
@@ -758,6 +884,10 @@ async function muatSemua() {
     // menggulir ke daftar transaksi ketika peringatan "perubahan belum sampai ke kasir" akhirnya
     // tergambar di atas layar — di luar pandangannya.
     await muatMaster()
+    // **Sesudah `muatMaster`, sebelum `muatTransaksi`.** Dropdown produknya menggabungkan nama
+    // master dengan nama di hasil; dimuat lebih dulu, produk yang NOL terjual tidak akan ada di
+    // dropdown pada gambar pertama — dan pemilik menyimpulkan produknya tidak terdaftar.
+    await muatProduk()
     await muatTransaksi()
   } catch (e) {
     pesan(e.message, true)
@@ -811,6 +941,7 @@ $('tombolFilter').addEventListener('click', async () => {
   // gerainya rugi.
   try {
     await muatKas()
+    await muatProduk()
     await muatTransaksi()
   } catch (e) {
     pesan(e.message, true)
@@ -868,6 +999,19 @@ $('kartuPengguna').addEventListener('click', async (e) => {
     if (!p) return
     return simpanPengguna(t, { uid: p.uid, nama: p.nama, aktif: t.dataset.aktif === '1' })
   }
+})
+
+// Delegasi di tingkat DOKUMEN untuk dropdown produk: `<select id="pilihProduk">` ikut digambar
+// ulang setiap kali kartunya digambar, jadi pemasang pada elemennya akan menempel pada elemen yang
+// sudah dibuang — pilihan berikutnya tidak menghasilkan apa pun, tanpa satu galat pun di konsol.
+// Penjaga id-nya perlu: `#pilihGerai` di header juga sebuah <select> dan punya penanganannya
+// sendiri.
+document.addEventListener('change', (e) => {
+  if (!e.target || e.target.id !== 'pilihProduk') return
+  produkTerpilih = e.target.value
+  // Hanya MENGGAMBAR ULANG. TIDAK memanggil server: agregat seluruh rentang sudah lengkap di
+  // `laporanProduk`, dan memintanya lagi berarti menunggu jaringan untuk data yang sudah dipegang.
+  gambarProduk()
 })
 
 // Sesi yang masih hidup langsung dipakai — pemilik tidak perlu mengetik sandi tiap kali membuka

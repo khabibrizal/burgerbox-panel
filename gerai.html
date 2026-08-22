@@ -77,6 +77,46 @@
   #masuk label { display: block; margin-bottom: 10px; font-size: 13px; color: var(--redup); }
   .rincian td { border: 0; padding: 3px 6px; font-size: 13px; }
   caption { text-align: left; font-weight: 600; padding: 6px; }
+
+  /* Di layar tidak ada; hanya muncul di kertas. */
+  .hanyaCetak { display: none }
+
+  /*
+    Yang disembunyikan ditentukan JENIS elemennya, bukan daftar id. Daftar id adalah daftar yang akan
+    menyimpang: kontrol yang ditambahkan tahun depan tidak akan ada di dalamnya, dan yang muncul
+    adalah tombol tercetak di atas kertas — cacat yang tidak memerahkan apa pun. Kelas cacat yang
+    sama baru saja menggigit di `billing/.gitignore`, di mana daftar dua nama berkas turunan
+    melewatkan kembarannya.
+
+    Di panel ini setiap <label> membungkus kontrol (`<label>Dari<input …></label>`) dan tidak ada
+    <label> tanpa kontrol — diperiksa, bukan diasumsikan (9 <label> di berkas ini, seluruhnya
+    membungkus <input> atau <select>).
+
+    `#pesan` SENGAJA tidak disembunyikan: bila permintaannya gagal, angka di kertas ini basi dan
+    kertasnya wajib menyebutkannya.
+  */
+  @media print {
+    #kepala button, #kepala select,
+    #isi button, #isi select, #isi input, #isi label { display: none }
+    #posisi { display: inline }
+    .hanyaCetak { display: block }
+    /* `#catatanCetakTrx` sebuah <span> di dalam baris yang sama dengan `#posisi`; `block` akan
+       memutusnya ke baris sendiri di tengah tata letak flex. */
+    span.hanyaCetak { display: inline }
+    /*
+      Per KARTU, bukan per wadah grid. `.angka` adalah grid berisi 4–5 kotak angka; menyuruhnya
+      utuh berarti menyuruh seluruh baris pindah halaman bersama-sama, dan yang muncul adalah
+      halaman pertama yang setengah kosong.
+    */
+    .kartu, .angka div, tr { break-inside: avoid }
+    /*
+      Padding halamannya ada di `main`, BUKAN di `body` — `body` hanya ber-`margin: 0`. Menulis
+      `body { padding: 0 }` di sini adalah aturan yang tidak mengubah apa pun; ia terlihat seperti
+      penjagaan dan tidak melakukan apa-apa.
+    */
+    main { padding: 0; max-width: none }
+    header { position: static }
+  }
 </style>
 </head>
 <body>
@@ -106,6 +146,10 @@
   </section>
 
   <div id="isi" class="sembunyi">
+    <!-- Diisi oleh `beforeprint`, bukan oleh tombolnya: cetak lewat menu peramban tidak
+         melewati tombol mana pun, dan kepala yang kosong di kertas adalah laporan tanpa
+         periode — angka yang terlihat sah dan tidak dapat dibantah. -->
+    <div id="kepalaCetak" class="hanyaCetak"></div>
     <div class="angka" id="ringkas"></div>
     <div class="kartu" id="kartuTagihan"></div>
 
@@ -122,7 +166,19 @@
         <label>Dari<input id="dari" type="date"></label>
         <label>Sampai<input id="sampai" type="date"></label>
         <button id="tombolFilter">Tampilkan</button>
+        <button id="tombolCetak">Cetak / Simpan PDF</button>
       </div>
+      <!--
+        Labelnya BUKAN "Unduh PDF": tidak ada berkas yang terunduh, yang muncul adalah dialog
+        cetak peramban. Tombol yang menjanjikan unduhan lalu membuka dialog cetak adalah janji
+        yang tidak ditepati — dan di peramban dalam-aplikasi ia bisa tidak berbuat apa-apa
+        sama sekali.
+      -->
+      <p class="redup" style="margin:0 0 10px;font-size:11px">
+        Tombol di atas membuka dialog cetak peramban; pilih <b>Simpan sebagai PDF</b> di sana.
+        Bila halaman ini dibuka dari dalam aplikasi lain (mis. tautan di WhatsApp), menu
+        cetaknya bisa tidak tersedia — buka di Chrome.
+      </p>
       <!--
         Di DALAM kartu yang memuat #dari/#sampai, bukan kartu sendiri: rentangnya yang SAMA, dan
         pasangan tanggal kedua di halaman ini akan membuat dua angka dapat berasal dari periode
@@ -133,6 +189,7 @@
       <div class="baris" style="margin-top:10px;justify-content:space-between">
         <button id="sebelumnya">← Sebelumnya</button>
         <span class="redup" id="posisi"></span>
+        <span id="catatanCetakTrx" class="hanyaCetak"></span>
         <button id="berikutnya">Berikutnya →</button>
       </div>
     </div>
@@ -217,6 +274,107 @@ function waktuWib(iso) {
   const p = (n) => String(n).padStart(2, '0')
   return `${w.getUTCFullYear()}-${p(w.getUTCMonth() + 1)}-${p(w.getUTCDate())} ` +
     `${p(w.getUTCHours())}.${p(w.getUTCMinutes())}`
+}
+
+/**
+ * Nama bulan Indonesia. Dipakai memformat tanggal TANPA melewati `Date`.
+ *
+ * **Sengaja tidak memakai `toLocaleDateString`.** Nilai `<input type="date">` adalah tanggal
+ * KALENDER yang dipilih pemilik, bukan sebuah instan. Melewatkannya lewat
+ * `new Date('2026-08-01T00:00:00+07:00')` lalu memformatnya akan menggeser satu hari di peramban
+ * ber-zona UTC atau lebih barat — dan yang tampak adalah laporan berperiode "31 Jul 2026" untuk
+ * rentang yang pemilik pilih mulai 1 Agustus. Tidak ada galat, hanya periode yang salah di kertas.
+ *
+ * Bukan dugaan: dijalankan di proses ber-`TZ=UTC`, jalur `Date` itu memang mencetak "31 Jul 2026".
+ * Zona waktu adalah satu-satunya kelas cacat yang sudah dua kali salah di fitur ini; tanggal
+ * kalender tidak pernah dirutekan lewat `Date`.
+ *
+ * Berbeda dari `waktuWib` di atas, yang memang memformat sebuah INSTAN (`terjadiPada` dari server)
+ * dan karenanya wajib berurusan dengan offset. Dua hal yang tampak mirip, dua aturan berbeda.
+ */
+const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+
+/** `2026-08-01` → `1 Agu 2026`. Kosong → `null`. Murni potong-string; nol aritmetika waktu. */
+function tanggalTeks(v) {
+  if (!v) return null
+  const bagian = String(v).split('-')
+  if (bagian.length !== 3) return null
+  return `${Number(bagian[2])} ${BULAN[Number(bagian[1]) - 1]} ${bagian[0]}`
+}
+
+/**
+ * Rentang sebagai teks yang selalu terbaca utuh.
+ *
+ * Keempat keadaan disebut, termasuk yang setengah. Rentang yang kosong berbunyi
+ * "Seluruh riwayat" — BUKAN string hampa: kepala cetak tanpa periode membuat seluruh angka di
+ * kertasnya tidak dapat dibantah maupun dipercaya.
+ */
+function rentangTeks(dari, sampai) {
+  const a = tanggalTeks(dari)
+  const b = tanggalTeks(sampai)
+  if (!a && !b) return 'Seluruh riwayat'
+  if (a && b) return `${a} \u2013 ${b}`
+  return a ? `sejak ${a}` : `sampai ${b}`
+}
+
+/**
+ * Isi blok kepala khusus-cetak.
+ *
+ * Menerima seluruh bahannya sebagai parameter supaya dapat diuji tanpa DOM. Yang membaca DOM adalah
+ * pemanggilnya (`isiKepalaCetak`), dan pemanggil itu dipasang di `beforeprint` — bukan di penekan
+ * tombol, sebab cetak lewat menu peramban tidak melewati tombol mana pun.
+ *
+ * `waktuCetak` wajib ada: tanpanya, laporan tercetak tidak dapat dibedakan dari laporan bulan lalu.
+ */
+function teksKepalaCetak(namaGerai, dari, sampai, waktuCetak) {
+  return (
+    `<h2 style="margin:0 0 2px;font-size:16px">${lolos(namaGerai)}</h2>` +
+    `<p style="margin:0;font-size:12px">Rentang: <b>${lolos(rentangTeks(dari, sampai))}</b></p>` +
+    `<p style="margin:0 0 10px;font-size:12px">Dicetak: ${lolos(waktuCetak)}</p>`
+  )
+}
+
+/**
+ * Kalimat kejujuran paginasi, dan ia BERSYARAT.
+ *
+ * `#posisi` berbunyi mis. `1–25 dari 137`. Mencetak halaman ini hanya mencetak 25 baris itu, jadi
+ * kertas yang menyebut dirinya "seluruh laporan" sedang berbohong. Tetapi daftar satu halaman tidak
+ * boleh membawa peringatan yang tidak berlaku: peringatan yang SELALU muncul berhenti dibaca, dan
+ * yang berhenti dibaca sama saja tidak ada.
+ *
+ * Pemisahnya en-dash U+2013, sebab itulah yang `muatTransaksi` sungguh tulis
+ * (`${awal}–${akhir} dari ${jumlah}`). Pola yang hanya menerima tanda hubung ASCII akan
+ * mengembalikan '' untuk SETIAP halaman sungguhan — bungkam justru ketika paginasinya nyata.
+ * Tanda hubung ASCII tetap diterima supaya perubahan pemisah di masa depan tidak membisukan
+ * kalimat ini tanpa suara.
+ *
+ * Kosong (`''`) bila posisinya belum terisi — halaman yang belum memuat apa pun tidak punya klaim
+ * yang perlu dikoreksi.
+ */
+function catatanPaginasi(posisi) {
+  const m = /^(\d+)[\u2013-](\d+) dari (\d+)$/.exec(String(posisi || '').trim())
+  if (!m) return ''
+  const tampil = Number(m[2]) - Number(m[1]) + 1
+  const jumlah = Number(m[3])
+  if (jumlah <= tampil) return ''
+  return ` \u2014 hanya ${tampil} dari ${jumlah} transaksi; sisanya di halaman lain dan TIDAK disertakan.`
+}
+
+/**
+ * Membaca DOM lalu mengisi blok kepala cetak & kalimat paginasinya.
+ *
+ * Dipasang di `beforeprint` (dan di `matchMedia('print')` untuk WebKit), dan itu satu-satunya
+ * tempatnya. Memasangnya juga di penekan tombol berarti dua pintu menuju cetak yang harus sepakat,
+ * dan yang lewat pintu peramban akan menghasilkan kepala basi.
+ */
+function isiKepalaCetak() {
+  const waktu = new Date().toLocaleString('id-ID', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+  $('kepalaCetak').innerHTML = teksKepalaCetak(
+    $('namaGerai').textContent, $('dari').value, $('sampai').value, waktu,
+  )
+  $('catatanCetakTrx').textContent = catatanPaginasi($('posisi').textContent)
 }
 
 function kartuAngka(label, nilai, ket) {
@@ -946,6 +1104,34 @@ $('tombolFilter').addEventListener('click', async () => {
   } catch (e) {
     pesan(e.message, true)
   }
+})
+
+// Kepalanya dibangun DI SINI, di `beforeprint` — bukan di penekan tombol. Ada dua pintu menuju
+// cetak: tombol di halaman ini, dan menu peramban (`Ctrl+P`, ⋮ → Cetak). Yang lewat pintu kedua
+// tidak melewati tombol mana pun, dan kepala yang kosong atau basi di kertas adalah laporan
+// berperiode salah yang tampak wajar.
+window.addEventListener('beforeprint', isiKepalaCetak)
+
+// WebKit — Safari di macOS dan SELURUH peramban di iOS, sebab semuanya memakai WebKit — tidak
+// mengimplementasikan `beforeprint`. Di sana pendengar di atas tidak pernah terpanggil, tanpa satu
+// galat pun, dan pemilik ber-iPhone mendapat kertas berkepala KOSONG. `matchMedia('print')` berubah
+// ketika pratinjau cetak dibuka dan memanggil FUNGSI YANG SAMA: bukan pintu kedua yang dapat
+// menyimpang, hanya pemicu kedua ke satu sumber. Terpanggil dua kali di Chrome tidak berakibat —
+// `isiKepalaCetak` hanya menulis ulang isi yang sama.
+const mediaCetak = typeof window.matchMedia === 'function' ? window.matchMedia('print') : null
+if (mediaCetak && typeof mediaCetak.addEventListener === 'function') {
+  mediaCetak.addEventListener('change', (e) => { if (e.matches) isiKepalaCetak() })
+}
+
+// Tombolnya HANYA membuka dialog cetak; ia tidak menyusun apa pun. `window.print` yang bukan fungsi
+// terjadi di sebagian peramban dalam-aplikasi. Yang TIDAK dapat dideteksi: `print` yang ada tetapi
+// mandul — itu disebut di kalimat kecil di bawah tombolnya, bukan disembunyikan.
+$('tombolCetak').addEventListener('click', () => {
+  if (typeof window.print !== 'function') {
+    pesan('Peramban ini tidak mendukung cetak. Buka halaman ini di Chrome.', true)
+    return
+  }
+  window.print()
 })
 
 $('sebelumnya').addEventListener('click', async () => {
